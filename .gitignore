@@ -23,6 +23,10 @@ backend/venv/
 
 # SQLite Database and Python files
 backend/database.db
+backend/data/*.db
+backend/data/*.db-shm
+backend/data/*.db-wal
+backend/cache/
 backend/__pycache__/
 backend/**/*.pyc
 *.pyc
