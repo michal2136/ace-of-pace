@@ -1,0 +1,15 @@
+osmnx
+networkx
+geopandas
+scikit-learn
+fastapi
+uvicorn
+requests
+sqlmodel
+httpx
+google-auth
+pyjwt
+python-dotenv
+polyline
+python-multipart
+pillow
