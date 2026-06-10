@@ -141,6 +141,8 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({ onNavigate, activeTab }) =
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+
+
   const handleGoogleSuccess = async (credentialResponse: any) => {
     if (loginLoading) return;           // zapobiega podwójnemu kliknięciu
     setLoginLoading(true);
@@ -211,7 +213,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({ onNavigate, activeTab }) =
     <header
       className="fixed top-0 left-0 right-0 flex items-center justify-between px-5 h-14"
       style={{
-        zIndex: 50,
+        zIndex: 1010,
         background: 'var(--nav-bg)',
         borderBottom: '1px solid var(--nav-border)',
         backdropFilter: 'blur(16px)',
