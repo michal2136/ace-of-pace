@@ -56,9 +56,11 @@ async def fetch_strava_activities(user_id: int, session: Session, limit: int = 1
         
     access_token = await refresh_strava_token_if_needed(tokens, session)
     
+    # Pobieramy więcej, żeby po przefiltrowaniu mieć wystarczająco biegów
+    fetch_limit = min(max(limit * 3, 50), 200)
     async with httpx.AsyncClient() as client:
         response = await client.get(
-            f"https://www.strava.com/api/v3/athlete/activities?per_page={limit}",
+            f"https://www.strava.com/api/v3/athlete/activities?per_page={fetch_limit}",
             headers={"Authorization": f"Bearer {access_token}"}
         )
         
@@ -69,6 +71,12 @@ async def fetch_strava_activities(user_id: int, session: Session, limit: int = 1
     parsed_activities = []
     
     for act in activities:
+        # Zostawiamy tylko treningi biegowe
+        act_type = act.get("type") or ""
+        sport_type = act.get("sport_type") or ""
+        if "run" not in act_type.lower() and "run" not in sport_type.lower():
+            continue
+
         # Płacą za mapę tylko po polyline (niezależnie jak obcięta lub wygładzona)
         map_poly = act.get("map", {}).get("summary_polyline")
         geojson_feature = None
@@ -86,5 +94,8 @@ async def fetch_strava_activities(user_id: int, session: Session, limit: int = 1
             "start_date": act["start_date"],
             "geojson": geojson_feature
         })
+        
+        if len(parsed_activities) >= limit:
+            break
         
     return parsed_activities

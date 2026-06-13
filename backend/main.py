@@ -64,11 +64,13 @@ _graph_cache: Dict[str, nx.MultiGraph] = {}
 
 def _get_or_fetch_graph(lat: float, lng: float, target_km: float) -> Optional[nx.MultiGraph]:
     """
-    Zwraca graf dopasowany do target_km.
-    dist = target_km * 1000 — bounding box wystarczająco duży na pełną pętlę.
-    Cache key: zaokrąglone współrzędne + bucket dystansu (co 5km).
+    Zwraca graf dla obszaru wystarczającego do wygenerowania pętli target_km.
+
+    Promień = D/2 + 10% marginesu — najdalszy punkt pętli nigdy nie przekroczy D/2.
+    Filtrujemy tylko drogi piesze/rowerowe/lokalne; autostrady i trasy szybkiego ruchu
+    są pomijane już na etapie zapytania do Overpass.
     """
-    # Bucket co 5km — unikamy refetchowania dla nieznacznie różnych dystansów
+    # Bucket co 5km → unikamy refetchowania przy nieznacznie różnych dystansach
     dist_bucket = max(5, int(math.ceil(target_km / 5.0)) * 5)
     lat_r = round(lat, 2)
     lon_r = round(lng, 2)
@@ -78,18 +80,24 @@ def _get_or_fetch_graph(lat: float, lng: float, target_km: float) -> Optional[nx
         print(f"  📦 Cache hit: {cache_key}")
         return _graph_cache[cache_key]
 
-    # dist w metrach = target_km * 1300 (bounding box od centrum)
-    # Zwiększamy bufor do 1.3x dystansu, żeby dać GA miejsce na manewry wokół celu
-    dist_m = int(target_km * 1300)
-    print(f"  🌍 Pobieranie OSM: center=({lat:.4f},{lng:.4f}), dist={dist_m}m [klucz: {cache_key}]")
+    # R = D/2 * 1.1 — zamiast D*1.3, co przy Warszawie (10km) dawało 13km promienia
+    dist_m = int((target_km / 2.0) * 1.1 * 1000)
+    print(f"  🌍 Pobieranie OSM: center=({lat:.4f},{lng:.4f}), R={dist_m}m (D/2+10%) [klucz: {cache_key}]")
     print(f"  ⏳ Pierwsze pobranie może zająć kilkanaście sekund...")
+
+    # Tylko drogi piesze/rowerowe/lokalne — bez motorway i trunk
+    _WALK_FILTER = (
+        '["highway"~"footway|path|residential|cycleway|pedestrian'
+        '|living_street|unclassified|track|service"]'
+    )
 
     try:
         G_raw = ox.graph_from_point(
             (lat, lng),
             dist=dist_m,
-            network_type='walk',
+            custom_filter=_WALK_FILTER,
             simplify=True,
+            retain_all=False,
         )
         G_un = nx.MultiGraph(G_raw.to_undirected())
         G_sane = sanitize_graph(G_un)

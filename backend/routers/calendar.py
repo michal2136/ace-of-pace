@@ -119,6 +119,9 @@ class CalendarEvent(BaseModel):
     distance_km:     Optional[float] = Field(default=None)
     description:     Optional[str]   = Field(default=None)
     goal_id:         Optional[int]   = Field(default=None)
+    # Strava actuals
+    avg_heart_rate:  Optional[int]   = Field(default=None)
+    avg_pace:        Optional[str]   = Field(default=None)   # "M:SS min/km"
     # Legacy v2
     target_pace:     Optional[str]   = Field(default=None)
     heart_rate_zone: Optional[str]   = Field(default=None)
@@ -266,17 +269,32 @@ async def _fetch_strava_events(
 
             distance_km = round(act.get("distance", 0) / 1000, 2)
 
+            # Tętno średnie [bpm]
+            avg_hr_raw = act.get("average_heartrate")
+            avg_hr = int(round(avg_hr_raw)) if avg_hr_raw else None
+
+            # Tempo — average_speed w m/s → min/km
+            avg_speed = act.get("average_speed")  # m/s
+            avg_pace = None
+            if avg_speed and avg_speed > 0:
+                pace_total_s = 1000 / avg_speed          # sekundy na km
+                pace_min = int(pace_total_s // 60)
+                pace_sec = int(pace_total_s % 60)
+                avg_pace = f"{pace_min}:{pace_sec:02d}"  # "5:32"
+
             events.append(CalendarEvent(
-                id           = f"strava-{act['id']}",
-                date         = activity_date,
-                label        = act.get("name", "Trening"),
-                is_completed = True,
-                source       = "strava",
-                type         = act.get("type"),
-                distance_km  = distance_km if distance_km > 0 else None,
-                description  = None,
-                goal_id      = None,
-                is_rest_day  = False,
+                id             = f"strava-{act['id']}",
+                date           = activity_date,
+                label          = act.get("name", "Trening"),
+                is_completed   = True,
+                source         = "strava",
+                type           = act.get("type"),
+                distance_km    = distance_km if distance_km > 0 else None,
+                avg_heart_rate = avg_hr,
+                avg_pace       = avg_pace,
+                description    = None,
+                goal_id        = None,
+                is_rest_day    = False,
             ))
 
     except Exception as exc:

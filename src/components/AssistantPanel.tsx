@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Sparkles, Loader2 } from 'lucide-react';
+import { Send, Sparkles } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const API = 'http://localhost:8000';
@@ -17,13 +17,37 @@ interface AssistantPanelProps {
   onAnalysisConsumed?: () => void;
 }
 
+// Minimal markdown: **bold**, newlines
+function renderText(text: string) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={i}>{part.slice(2, -2)}</strong>;
+    }
+    return part.split('\n').map((line, j, arr) => (
+      <React.Fragment key={`${i}-${j}`}>
+        {line}
+        {j < arr.length - 1 && <br />}
+      </React.Fragment>
+    ));
+  });
+}
+
+function TypingDots() {
+  return (
+    <span className="typing-dots" aria-label="Kasia pisze…">
+      <span /><span /><span />
+    </span>
+  );
+}
+
 export const AssistantPanel: React.FC<AssistantPanelProps> = ({ initialAnalysis, onAnalysisConsumed }) => {
   const { user, isLoggedIn } = useAuth();
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 1,
       sender: 'Kasia',
-      text: "Hej biegaczu! 👋 Jestem Kasia, Twoja trenerka AI. Pytaj mnie o treningi, strategię startową, albo prześlij aktywność do analizy — rozbiorę ją na czynniki pierwsze! 🏃",
+      text: "Hej! Jestem Kasia, Twoja trenerka AI. Pytaj mnie o treningi, strategię startową, albo prześlij aktywność ze Stravy do analizy.",
       isAi: true,
     },
   ]);
@@ -31,6 +55,7 @@ export const AssistantPanel: React.FC<AssistantPanelProps> = ({ initialAnalysis,
   const [isSending, setIsSending] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const processedRef = useRef<number | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const scrollToBottom = () => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   useEffect(scrollToBottom, [messages]);
@@ -54,7 +79,10 @@ export const AssistantPanel: React.FC<AssistantPanelProps> = ({ initialAnalysis,
 
   const replaceLoadingMessage = (text: string) => {
     setMessages(prev => {
-      const idx = prev.findLastIndex(m => m.isLoading);
+      let idx = -1;
+      for (let i = prev.length - 1; i >= 0; i--) {
+        if (prev[i].isLoading) { idx = i; break; }
+      }
       if (idx === -1) return prev;
       const copy = [...prev];
       copy[idx] = { ...copy[idx], text, isLoading: false };
@@ -64,8 +92,8 @@ export const AssistantPanel: React.FC<AssistantPanelProps> = ({ initialAnalysis,
 
   const handleAnalyzeActivity = async (activityId: number, activityName: string) => {
     if (!user) return;
-    addMessage({ sender: 'Ty', text: `Przeanalizuj mój trening: "${activityName}"`, isAi: false });
-    addMessage({ sender: 'Kasia', text: '🔍 Pobieram dane ze Stravy i analizuję…', isAi: true, isLoading: true });
+    addMessage({ sender: 'Ty', text: `Przeanalizuj mój trening: „${activityName}"`, isAi: false });
+    addMessage({ sender: 'Kasia', text: '', isAi: true, isLoading: true });
     setIsSending(true);
     try {
       const res = await fetch(`${API}/api/assistant/analyze-activity`, {
@@ -76,7 +104,7 @@ export const AssistantPanel: React.FC<AssistantPanelProps> = ({ initialAnalysis,
       if (!res.ok) throw new Error((await res.json()).detail || 'Błąd API');
       replaceLoadingMessage((await res.json()).response);
     } catch (err: any) {
-      replaceLoadingMessage(`⚠️ Błąd: ${err.message}`);
+      replaceLoadingMessage(`Błąd: ${err.message}`);
     } finally {
       setIsSending(false);
     }
@@ -87,7 +115,7 @@ export const AssistantPanel: React.FC<AssistantPanelProps> = ({ initialAnalysis,
     if (!msg || isSending) return;
     addMessage({ sender: 'Ty', text: msg, isAi: false });
     setInputValue('');
-    addMessage({ sender: 'Kasia', text: '💭 Myślę…', isAi: true, isLoading: true });
+    addMessage({ sender: 'Kasia', text: '', isAi: true, isLoading: true });
     setIsSending(true);
     try {
       const res = await fetch(`${API}/api/assistant/chat`, {
@@ -98,9 +126,10 @@ export const AssistantPanel: React.FC<AssistantPanelProps> = ({ initialAnalysis,
       if (!res.ok) throw new Error((await res.json()).detail || 'Błąd API');
       replaceLoadingMessage((await res.json()).response);
     } catch (err: any) {
-      replaceLoadingMessage(`⚠️ Błąd: ${err.message}`);
+      replaceLoadingMessage(`Błąd: ${err.message}`);
     } finally {
       setIsSending(false);
+      setTimeout(() => inputRef.current?.focus(), 50);
     }
   };
 
@@ -112,145 +141,180 @@ export const AssistantPanel: React.FC<AssistantPanelProps> = ({ initialAnalysis,
   };
 
   return (
-    <div
-      className="flex flex-col h-full overflow-hidden"
-      style={{ background: 'var(--color-surface)' }}
-    >
-      {/* Header */}
+    <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--color-bg)' }}>
+
+      {/* ── Header ─────────────────────────────────────────── */}
       <div
-        className="flex items-center justify-between px-4 py-3 shrink-0"
-        style={{ borderBottom: '1px solid var(--color-border)' }}
+        className="shrink-0 px-4 py-3 flex items-center gap-3"
+        style={{
+          borderBottom: '1px solid var(--color-border)',
+          background: 'var(--color-surface)',
+        }}
       >
-        <div className="flex items-center gap-3">
+        {/* Avatar */}
+        <div className="relative shrink-0">
           <div
-            className="w-9 h-9 rounded-xl flex items-center justify-center relative shadow-lg"
-            style={{ background: 'linear-gradient(135deg, #8b5cf6, #6366f1)' }}
+            className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white"
+            style={{ background: 'linear-gradient(135deg, #a855f7 0%, #6366f1 100%)' }}
           >
-            <span className="text-white font-black italic text-base">K</span>
-            <span
-              className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2"
-              style={{
-                background: '#10b981',
-                borderColor: 'var(--color-surface)',
-                boxShadow: '0 0 6px rgba(16,185,129,0.7)',
-              }}
-            />
+            K
           </div>
-          <div>
-            <p
-              className="text-sm font-bold tracking-wide"
-              style={{
-                background: 'linear-gradient(135deg, #a855f7, #6366f1)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-              }}
-            >
-              KASIA
-            </p>
-            <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#10b981' }}>
-              Running Coach AI
-            </p>
-          </div>
+          <span
+            className="absolute -bottom-px -right-px w-2.5 h-2.5 rounded-full border-2"
+            style={{
+              background: 'var(--color-success)',
+              borderColor: 'var(--color-surface)',
+            }}
+          />
         </div>
-        <div className="flex items-center gap-1.5">
-          <Sparkles className="w-4 h-4" style={{ color: 'var(--color-accent)' }} />
-          <span className="text-[10px] font-medium" style={{ color: 'var(--color-text-muted)' }}>AI</span>
+
+        {/* Name */}
+        <div className="min-w-0">
+          <p className="text-sm font-semibold leading-none" style={{ color: 'var(--color-text-primary)' }}>
+            Kasia
+          </p>
+          <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
+            Running Coach AI
+          </p>
         </div>
+
+        <Sparkles className="ml-auto w-3.5 h-3.5 shrink-0" style={{ color: 'var(--color-text-muted)' }} />
       </div>
 
-      {/* Chat area */}
-      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 custom-scrollbar">
-        <div className="text-center">
-          <span
-            className="text-[10px] font-medium px-3 py-1 rounded-full"
+      {/* ── Messages ───────────────────────────────────────── */}
+      <div
+        className="flex-1 overflow-y-auto custom-scrollbar px-4 py-4 flex flex-col gap-2"
+        style={{ background: 'var(--color-bg)' }}
+      >
+        {!isLoggedIn && (
+          <div
+            className="text-center text-xs py-2 px-3 rounded-lg"
             style={{
               background: 'var(--color-surface-overlay)',
               color: 'var(--color-text-muted)',
               border: '1px solid var(--color-border)',
             }}
           >
-            {isLoggedIn ? 'Pytaj Kasię o treningi i strategię' : 'Zaloguj się, żeby porozmawiać z Kasią'}
-          </span>
-        </div>
+            Zaloguj się, żeby porozmawiać z Kasią
+          </div>
+        )}
 
-        {messages.map((msg) => (
-          <div key={msg.id} className={`flex flex-col ${msg.isAi ? 'items-start' : 'items-end'} gap-1`}>
-            <div className="flex items-center gap-1.5 px-1">
+        {messages.map((msg, idx) => {
+          const prevMsg = messages[idx - 1];
+          const isFirstInGroup = !prevMsg || prevMsg.isAi !== msg.isAi;
+
+          return (
+            <div
+              key={msg.id}
+              className={`flex ${msg.isAi ? 'justify-start' : 'justify-end'} ${isFirstInGroup ? 'mt-2' : ''}`}
+            >
+              {/* Kasia avatar — tylko przy pierwszej w grupie */}
               {msg.isAi && (
-                <div
-                  className="w-4 h-4 rounded-md flex items-center justify-center text-[9px] font-bold text-white italic"
-                  style={{ background: 'linear-gradient(135deg, #8b5cf6, #6366f1)' }}
-                >
-                  K
+                <div className="mr-2 mt-auto shrink-0">
+                  {isFirstInGroup ? (
+                    <div
+                      className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white"
+                      style={{ background: 'linear-gradient(135deg, #a855f7, #6366f1)' }}
+                    >
+                      K
+                    </div>
+                  ) : (
+                    <div className="w-6" />
+                  )}
                 </div>
               )}
-              <span className="text-[11px] font-medium" style={{ color: 'var(--color-text-muted)' }}>
-                {msg.sender}
-              </span>
+
+              <div
+                className="max-w-[82%] px-3.5 py-2.5 text-[13px] leading-relaxed"
+                style={
+                  msg.isAi
+                    ? {
+                        background: 'var(--color-surface-elevated)',
+                        color: 'var(--color-text-primary)',
+                        borderRadius: isFirstInGroup
+                          ? '16px 16px 16px 4px'
+                          : '4px 16px 16px 4px',
+                        border: '1px solid var(--color-border)',
+                        boxShadow: isFirstInGroup
+                          ? '0 0 0 1px rgba(168,85,247,0.08), 0 1px 3px rgba(0,0,0,0.2)'
+                          : '0 1px 3px rgba(0,0,0,0.15)',
+                      }
+                    : {
+                        background: 'var(--color-surface-overlay)',
+                        color: 'var(--color-text-primary)',
+                        borderRadius: isFirstInGroup
+                          ? '16px 16px 4px 16px'
+                          : '16px 4px 4px 16px',
+                        border: '1px solid var(--color-border-strong)',
+                      }
+                }
+              >
+                {msg.isLoading ? (
+                  <TypingDots />
+                ) : (
+                  <span className="whitespace-pre-wrap">{renderText(msg.text)}</span>
+                )}
+              </div>
             </div>
-            <div
-              className="px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap max-w-[90%]"
-              style={
-                msg.isAi
-                  ? {
-                      background: 'var(--color-surface-overlay)',
-                      border: '1px solid rgba(139,92,246,0.2)',
-                      color: 'var(--color-text-primary)',
-                      borderRadius: '12px 12px 12px 4px',
-                    }
-                  : {
-                      background: 'var(--color-accent-subtle)',
-                      border: '1px solid rgba(99,102,241,0.25)',
-                      color: 'var(--color-text-primary)',
-                      borderRadius: '12px 12px 4px 12px',
-                    }
-              }
-            >
-              {msg.isLoading ? (
-                <span className="flex items-center gap-2">
-                  <Loader2 className="w-4 h-4 animate-spin" style={{ color: '#a855f7' }} />
-                  {msg.text}
-                </span>
-              ) : (
-                msg.text
-              )}
-            </div>
-          </div>
-        ))}
+          );
+        })}
+
         <div ref={chatEndRef} />
       </div>
 
-      {/* Input */}
+      {/* ── Input ──────────────────────────────────────────── */}
       <div
-        className="p-3 shrink-0"
-        style={{ borderTop: '1px solid var(--color-border)' }}
+        className="shrink-0 px-3 py-3"
+        style={{
+          borderTop: '1px solid var(--color-border)',
+          background: 'var(--color-surface)',
+        }}
       >
         <div
-          className="flex items-center rounded-xl transition-all"
+          className="flex items-center gap-2 px-3 py-2 rounded-xl transition-all"
           style={{
             background: 'var(--color-surface-overlay)',
             border: '1px solid var(--color-border)',
+            outline: 'none',
           }}
-          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-accent)')}
-          onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+          onFocusCapture={e => {
+            (e.currentTarget as HTMLElement).style.borderColor = 'rgba(168,85,247,0.5)';
+            (e.currentTarget as HTMLElement).style.boxShadow = '0 0 0 2px rgba(168,85,247,0.12)';
+          }}
+          onBlurCapture={e => {
+            (e.currentTarget as HTMLElement).style.borderColor = 'var(--color-border)';
+            (e.currentTarget as HTMLElement).style.boxShadow = 'none';
+          }}
         >
           <input
+            ref={inputRef}
             type="text"
-            placeholder={isLoggedIn ? 'Napisz do Kasi...' : 'Zaloguj się, aby rozmawiać'}
+            placeholder={isLoggedIn ? 'Napisz do Kasi…' : 'Zaloguj się, aby rozmawiać'}
             value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
+            onChange={e => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
             disabled={!isLoggedIn || isSending}
-            className="flex-1 bg-transparent border-none py-2.5 pl-4 pr-2 text-sm focus:outline-none disabled:opacity-50"
-            style={{ color: 'var(--color-text-primary)' }}
+            className="flex-1 bg-transparent text-[13px] outline-none disabled:opacity-40"
+            style={{
+              color: 'var(--color-text-primary)',
+              caretColor: '#a855f7',
+            }}
           />
           <button
             onClick={handleSend}
             disabled={!isLoggedIn || isSending || !inputValue.trim()}
-            className="p-2 mr-1 rounded-lg transition-all disabled:opacity-30 hover:scale-105 active:scale-95"
-            style={{ color: 'var(--color-accent)' }}
+            className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-all disabled:opacity-30"
+            style={{
+              background: inputValue.trim() && isLoggedIn && !isSending
+                ? 'linear-gradient(135deg, #a855f7, #6366f1)'
+                : 'transparent',
+              color: inputValue.trim() && isLoggedIn && !isSending
+                ? '#fff'
+                : 'var(--color-text-muted)',
+            }}
+            aria-label="Wyślij"
           >
-            <Send className="w-4 h-4" />
+            <Send className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>

@@ -188,17 +188,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({ onNavigate, activeTab }) =
     setDropdownOpen(false);
   };
 
-  const handleTabClick = (tab: DropdownTab) => {
-    setActiveDropdownTab(tab);
-    if (tab === 'profile') navigateAndClose('planner');   // Profile info is in PlannerPanel (goals section)
-    if (tab === 'goals') navigateAndClose('planner');
-    if (tab === 'settings') {
-      // Settings: handle inline (Strava link)
-      if (!user?.strava_linked) {
-        window.location.href = `${API}/api/auth/strava/login?user_id=${user?.user_id}`;
-      }
-    }
-  };
+
 
   // Display name: prefer server-side display_name, fall back to email prefix
   const displayName = user?.display_name || user?.email?.split('@')[0] || 'Runner';
@@ -211,49 +201,58 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({ onNavigate, activeTab }) =
 
   return (
     <header
-      className="fixed top-0 left-0 right-0 flex items-center justify-between px-5 h-14"
+      className="fixed top-0 left-0 right-0 flex items-center justify-between px-5 h-16 bg-bg border-b border-border"
       style={{
         zIndex: 1010,
-        background: 'var(--nav-bg)',
-        borderBottom: '1px solid var(--nav-border)',
-        backdropFilter: 'blur(16px)',
-        WebkitBackdropFilter: 'blur(16px)',
+        background: 'var(--color-bg)',
+        borderBottom: '1px solid var(--color-border)',
       }}
     >
       {/* ── Logo ─────────────────────────────────────────────────── */}
       <div className="flex items-center gap-3 select-none">
-        <div className="flex items-center gap-2">
-          <div
-            className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-black"
-            style={{ background: 'linear-gradient(135deg, #6366f1, #10b981)' }}
-          >
-            A
-          </div>
-          <span
-            className="text-base font-extrabold tracking-tight"
-            style={{
-              background: 'linear-gradient(135deg, #6366f1, #818cf8, #10b981)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-            }}
-          >
-            Ace of Pace
-          </span>
-        </div>
         <span
-          className="hidden sm:inline text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full"
-          style={{
-            color: 'var(--color-text-muted)',
-            background: 'var(--color-surface-overlay)',
-            border: '1px solid var(--color-border)',
-          }}
+          className="text-lg font-black tracking-tighter uppercase flex items-baseline gap-1"
+          style={{ color: 'var(--color-text-primary)', fontFamily: 'var(--font-display)' }}
         >
-          v1.2
+          ACE OF PACE <span className="w-2 h-2 rounded-full" style={{ background: 'var(--color-accent)' }} />
         </span>
       </div>
 
+      {/* ── Center navigation ────────────────────────────────────── */}
+      <div className="hidden md:flex items-center justify-center absolute left-1/2 -translate-x-1/2 gap-8">
+        {[
+          { id: 'mapper', label: 'MAPPER', num: '01' },
+          { id: 'routes', label: 'TRASY', num: '02' },
+          { id: 'strava', label: 'TRENINGI', num: '03' },
+          { id: 'planner', label: 'PLANER', num: '04' },
+          { id: 'assistant', label: 'KASIA', num: '05' },
+        ].map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => onNavigate?.(tab.id as any)}
+            className="flex items-center gap-2 text-[11px] uppercase tracking-widest transition-opacity cursor-pointer border-none bg-transparent"
+            style={{
+              fontFamily: 'var(--font-mono)',
+              color: activeTab === tab.id ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+              fontWeight: activeTab === tab.id ? 700 : 500,
+            }}
+          >
+            <span style={{ color: activeTab === tab.id ? 'var(--color-accent)' : 'var(--color-text-muted)' }}>{tab.num}</span>
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       {/* ── Right controls ───────────────────────────────────────── */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-4">
+        
+        {/* Version label */}
+        <span
+          className="hidden sm:inline text-[10px] uppercase tracking-widest border-r border-border pr-4"
+          style={{ color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}
+        >
+          PL · v1.0
+        </span>
 
         {/* Theme toggle */}
         <button
@@ -277,23 +276,18 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({ onNavigate, activeTab }) =
             <button
               id="profile-dropdown-trigger"
               onClick={() => setDropdownOpen(o => !o)}
-              className="flex items-center gap-2 px-2 py-1 rounded-xl transition-all duration-150"
-              style={{
-                background: dropdownOpen ? 'var(--color-surface-overlay)' : 'transparent',
-                border: '1px solid',
-                borderColor: dropdownOpen ? 'var(--color-border)' : 'transparent',
-              }}
+              className="flex items-center gap-2 px-2 py-1 transition-all duration-150 cursor-pointer bg-transparent border-none"
             >
-              <UserAvatar imageUrl={avatarImageUrl} emoji={avatarEmoji} initials={initials} size={28} />
+              <UserAvatar imageUrl={avatarImageUrl} emoji={avatarEmoji} initials={initials} size={24} />
               <span
-                className="hidden sm:block text-sm font-semibold max-w-[100px] truncate"
+                className="hidden sm:block text-[11px] font-bold uppercase tracking-widest max-w-[100px] truncate"
                 style={{ color: 'var(--color-text-primary)' }}
               >
                 {displayName}
               </span>
               <ChevronDown
                 className={`w-3.5 h-3.5 transition-transform duration-200 ${dropdownOpen ? 'rotate-180' : ''}`}
-                style={{ color: 'var(--color-text-muted)' }}
+                style={{ color: 'var(--color-accent)' }}
               />
             </button>
 

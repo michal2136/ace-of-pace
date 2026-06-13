@@ -34,7 +34,9 @@ const MapUpdater = ({ location }: { location: LocationState }) => {
 
 const RouteEditor = ({ waypoints, segments, onInsertWaypoint }: any) => {
   const map = useMap();
+  const { theme } = useTheme();
   const [dragTempPt, setDragTempPt] = useState<{latlng: LatLngExpression, afterId: string} | null>(null);
+  const routeColor = theme === 'light' ? '#90B300' : '#CEFF00';
 
   useMapEvents({
     mousemove(e) {
@@ -42,7 +44,7 @@ const RouteEditor = ({ waypoints, segments, onInsertWaypoint }: any) => {
         setDragTempPt({ ...dragTempPt, latlng: [e.latlng.lat, e.latlng.lng] });
       }
     },
-    mouseup(e) {
+    mouseup() {
       if (dragTempPt) {
         onInsertWaypoint(dragTempPt.afterId, dragTempPt.latlng);
         setDragTempPt(null);
@@ -62,8 +64,8 @@ const RouteEditor = ({ waypoints, segments, onInsertWaypoint }: any) => {
           if (fromWp && toWp) {
             return (
               <React.Fragment key={`${seg.fromId}-${seg.toId}-split`}>
-                <Polyline positions={[fromWp.latlng, dragTempPt.latlng]} pathOptions={{ color: '#8b5cf6', weight: 4, dashArray: '5,5' }} />
-                <Polyline positions={[dragTempPt.latlng, toWp.latlng]} pathOptions={{ color: '#8b5cf6', weight: 4, dashArray: '5,5' }} />
+                <Polyline positions={[fromWp.latlng, dragTempPt.latlng]} pathOptions={{ color: routeColor, weight: 4, dashArray: '5,5' }} />
+                <Polyline positions={[dragTempPt.latlng, toWp.latlng]} pathOptions={{ color: routeColor, weight: 4, dashArray: '5,5' }} />
               </React.Fragment>
             );
           }
@@ -74,7 +76,7 @@ const RouteEditor = ({ waypoints, segments, onInsertWaypoint }: any) => {
             key={`${seg.fromId}-${seg.toId}`}
             positions={seg.geojson} 
             pathOptions={{ 
-              color: seg.isError ? '#ef4444' : '#4f46e5', 
+              color: seg.isError ? '#ef4444' : routeColor, 
               weight: 6, 
               className: seg.isLoading ? 'animate-pulse opacity-40' : 'cursor-grab hover:opacity-100 transition-opacity',
               opacity: seg.isLoading ? 0.4 : 0.85
@@ -93,7 +95,7 @@ const RouteEditor = ({ waypoints, segments, onInsertWaypoint }: any) => {
         <Marker 
           position={dragTempPt.latlng}
           icon={L.divIcon({
-            html: `<div class="bg-violet-500 w-4 h-4 rounded-full border-[3px] border-white shadow-xl"></div>`,
+            html: `<div class="bg-[var(--color-accent)] w-4 h-4 rounded-full border-[3px] border-white shadow-xl"></div>`,
             className: 'bg-transparent border-none',
             iconSize: [16, 16],
             iconAnchor: [8, 8],
@@ -127,9 +129,9 @@ const createMarkerIcon = (isStart: boolean, isEnd: boolean) => {
   });
 };
 
-const homeIconHtml = renderToString(<Home className="w-5 h-5 text-indigo-50" />);
+const homeIconHtml = renderToString(<Home className="w-5 h-5 text-primary" style={{ color: 'var(--color-accent)' }} />);
 const homeMarkerIcon = L.divIcon({
-  html: `<div class="bg-indigo-600/90 backdrop-blur-md w-9 h-9 flex items-center justify-center rounded-2xl border-2 border-indigo-400 shadow-xl transition-all duration-300 hover:scale-110 cursor-pointer">
+  html: `<div class="bg-[var(--color-surface)] w-9 h-9 flex items-center justify-center rounded-[var(--radius)] border border-[var(--color-border)] hover:border-[var(--color-accent)] shadow-xl transition-all duration-300 hover:scale-110 cursor-pointer">
            ${homeIconHtml}
          </div>`,
   className: 'bg-transparent border-none',
@@ -140,6 +142,14 @@ const homeMarkerIcon = L.divIcon({
 export const MapComponent = ({ waypoints, segments, location, routeData, onAddWaypoint, onUpdateWaypoint, onInsertWaypoint, onRemoveWaypoint }: MapComponentProps) => {
   const { theme } = useTheme();
   const tileUrl = theme === 'light' ? TILE_LIGHT : TILE_DARK;
+  const routeColor = theme === 'light' ? '#90B300' : '#CEFF00';
+  const hasRoute = !!(routeData || waypoints.length > 0);
+
+  // Sprawdzamy czy pierwszy waypoint nakłada się na pozycję bazy
+  const isStartAtBase = waypoints.length > 0 && 
+    Math.abs((Array.isArray(waypoints[0].latlng) ? waypoints[0].latlng[0] : (waypoints[0].latlng as any).lat) - location.lat) < 0.0001 &&
+    Math.abs((Array.isArray(waypoints[0].latlng) ? waypoints[0].latlng[1] : (waypoints[0].latlng as any).lng) - location.lng) < 0.0001;
+
   return (
     <div className="relative h-full w-full">
       <MapContainer 
@@ -156,41 +166,68 @@ export const MapComponent = ({ waypoints, segments, location, routeData, onAddWa
         />
         <MapInteractions onAddWaypoint={onAddWaypoint} />
         
-        {/* Ikona Domyślnej Bazy / GPS */}
-        <Marker 
-          position={[location.lat, location.lng]} 
-          icon={homeMarkerIcon}
-          zIndexOffset={-100} // by nie przysłaniał trasy
-        >
-          <Tooltip direction="top" offset={[0, -15]} opacity={0.9} className="font-bold text-indigo-600 border-0 shadow-lg rounded-2xl px-3 py-1">
-            {location.cityName} (Baza)
-          </Tooltip>
-          <Popup className="min-w-[170px] p-0 m-0 custom-popup">
-            <div className="flex flex-col items-center gap-1.5 p-1 pt-2 pb-0 opacity-90">
-              <span className="font-black text-indigo-900 text-[15px]">{location.cityName}</span>
-              <span className="text-[10px] text-gray-500 uppercase tracking-wider font-bold mb-1">Zapisana Baza / GPS</span>
-              <button 
-                onClick={() => {
-                  onAddWaypoint([location.lat, location.lng]);
+        {/* Ikona Domyślnej Bazy / GPS — ukrywana gdy nakłada się z rzeczywistym startem trasy */}
+        {!isStartAtBase && (
+          <Marker 
+            position={[location.lat, location.lng]} 
+            icon={homeMarkerIcon}
+            zIndexOffset={-100}
+          >
+            <Tooltip 
+              direction="top" 
+              offset={[0, -15]} 
+              opacity={0.95} 
+              className="font-bold text-[var(--color-accent)] bg-[var(--color-surface)] border border-[var(--color-border)] shadow-lg rounded-[var(--radius)] px-3 py-1 font-mono-custom text-xs"
+            >
+              {location.cityName} (Baza)
+            </Tooltip>
+            <Popup className="min-w-[180px] p-0 m-0 custom-popup">
+              <div 
+                className="flex flex-col items-center gap-1.5 p-1"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.nativeEvent.stopPropagation();
                 }}
-                className="mt-1 bg-indigo-500 hover:bg-indigo-600 active:bg-indigo-700 text-white text-xs font-bold py-2 px-3 rounded-lg w-full transition-colors shadow-sm whitespace-nowrap"
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  e.nativeEvent.stopPropagation();
+                }}
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  e.nativeEvent.stopPropagation();
+                }}
+                onMouseUp={(e) => {
+                  e.stopPropagation();
+                  e.nativeEvent.stopPropagation();
+                }}
               >
-                Rozpocznij trasę stąd
-              </button>
-            </div>
-          </Popup>
-        </Marker>
+                <span className="font-display font-black text-primary text-[15px] tracking-tight">{location.cityName}</span>
+                <span className="text-[10px] text-secondary font-mono-custom uppercase tracking-widest font-bold">Zapisana Baza / GPS</span>
+                {!hasRoute && (
+                  <button 
+                    onClick={() => {
+                      onAddWaypoint([location.lat, location.lng]);
+                    }}
+                    className="mt-2 bg-accent hover:bg-accent-hover text-accent-fg text-xs font-bold py-2 px-3 rounded-[var(--radius)] w-full transition-colors shadow-sm whitespace-nowrap uppercase tracking-wider font-display cursor-pointer"
+                  >
+                    Rozpocznij trasę stąd
+                  </button>
+                )}
+              </div>
+            </Popup>
+          </Marker>
+        )}
 
         <RouteEditor waypoints={waypoints} segments={segments} onInsertWaypoint={onInsertWaypoint} />
 
         {routeData && (
           <GeoJSON 
-            key={JSON.stringify(routeData)} // Wymuś re-render przy nowych danych ORS
+            key={JSON.stringify(routeData)} 
             data={routeData} 
             style={{
-              color: '#3b82f6', // Gruby błękit
-              weight: 8,
-              opacity: 0.6,
+              color: routeColor,
+              weight: 6,
+              opacity: 0.85,
               lineCap: 'round',
               lineJoin: 'round',
             }}
@@ -198,9 +235,9 @@ export const MapComponent = ({ waypoints, segments, location, routeData, onAddWa
         )}
 
         {waypoints.map((wp, idx) => {
-          const isClosed = waypoints.length >= 2 && 
-            waypoints[0].latlng[0] === waypoints[waypoints.length - 1].latlng[0] && 
-            waypoints[0].latlng[1] === waypoints[waypoints.length - 1].latlng[1];
+          const startPt = waypoints.length >= 2 ? L.latLng(waypoints[0].latlng) : null;
+          const endPt = waypoints.length >= 2 ? L.latLng(waypoints[waypoints.length - 1].latlng) : null;
+          const isClosed = !!(startPt && endPt && startPt.lat === endPt.lat && startPt.lng === endPt.lng);
           const canCloseLoop = idx === 0 && waypoints.length >= 2 && !isClosed;
 
           return (
@@ -227,12 +264,30 @@ export const MapComponent = ({ waypoints, segments, location, routeData, onAddWa
                 </Tooltip>
               ) : (
                 <Popup className="min-w-[140px] p-0 m-0 custom-popup">
-                  <div className="flex flex-col items-center gap-1.5 p-1 pt-2 pb-0 opacity-90">
-                    <span className="font-bold text-gray-800 text-sm">Punkt #{idx + 1}</span>
-                    <span className="text-xs text-gray-500 text-center leading-tight">Możesz go przeciągnąć.</span>
+                  <div 
+                    className="flex flex-col items-center gap-1.5 p-1"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.nativeEvent.stopPropagation();
+                    }}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      e.nativeEvent.stopPropagation();
+                    }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      e.nativeEvent.stopPropagation();
+                    }}
+                    onMouseUp={(e) => {
+                      e.stopPropagation();
+                      e.nativeEvent.stopPropagation();
+                    }}
+                  >
+                    <span className="font-display font-bold text-primary text-sm">Punkt #{idx + 1}</span>
+                    <span className="text-xs text-secondary text-center leading-tight">Możesz go przeciągnąć.</span>
                     <button 
                       onClick={() => onRemoveWaypoint(wp.id)}
-                      className="mt-2 bg-red-500 hover:bg-red-600 active:bg-red-700 text-white text-xs font-bold py-2 px-3 rounded-lg w-full transition-colors shadow-sm"
+                      className="mt-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-2 px-3 rounded-[var(--radius)] w-full transition-colors shadow-sm uppercase tracking-wider font-display cursor-pointer"
                     >
                       Usuń punkt
                     </button>

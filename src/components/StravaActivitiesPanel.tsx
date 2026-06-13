@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Loader2, Activity, MapPin, Calendar, Route as RouteIcon, Zap, Sparkles } from 'lucide-react';
+import { Loader2, Activity, MapPin, Zap, Sparkles, ChevronDown } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { SaveRouteWidget } from './SaveRouteWidget';
 
@@ -19,9 +19,11 @@ interface StravaActivitiesPanelProps {
 export const StravaActivitiesPanel: React.FC<StravaActivitiesPanelProps> = ({ onLoadRoute, onRequestAnalysis }) => {
   const { user, isLoggedIn } = useAuth();
   const [activities, setActivities] = useState<StravaActivity[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [activeId, setActiveId] = useState<number | null>(null);
+  const [isLoading, setIsLoading]   = useState(false);
+  const [error, setError]           = useState<string | null>(null);
+
+  // Accordion: which card is expanded
+  const [expandedId, setExpandedId] = useState<number | null>(null);
 
   useEffect(() => {
     if (!isLoggedIn || !user?.strava_linked) return;
@@ -87,10 +89,13 @@ export const StravaActivitiesPanel: React.FC<StravaActivitiesPanelProps> = ({ on
     </div>
   );
 
-  const handleClick = (act: StravaActivity) => {
-    if (!act.slad_gps_geojson) return;
-    setActiveId(act.id);
-    onLoadRoute(act.slad_gps_geojson);
+  const handleCardClick = (act: StravaActivity) => {
+    if (expandedId === act.id) {
+      setExpandedId(null);
+    } else {
+      setExpandedId(act.id);
+      if (act.slad_gps_geojson) onLoadRoute(act.slad_gps_geojson);
+    }
   };
 
   const handleAnalyze = (e: React.MouseEvent, act: StravaActivity) => {
@@ -118,6 +123,7 @@ export const StravaActivitiesPanel: React.FC<StravaActivitiesPanelProps> = ({ on
 
   return (
     <div className="flex flex-col gap-2">
+      {/* Header */}
       <div
         className="flex items-center gap-2 px-1 pb-2"
         style={{ borderBottom: '1px solid var(--color-border)' }}
@@ -133,97 +139,113 @@ export const StravaActivitiesPanel: React.FC<StravaActivitiesPanelProps> = ({ on
 
       <div className="flex flex-col gap-2 overflow-y-auto custom-scrollbar">
         {activities.map((act) => {
-          const hasGps = !!act.slad_gps_geojson;
-          const isActive = activeId === act.id;
+          const hasGps     = !!act.slad_gps_geojson;
+          const isExpanded = expandedId === act.id;
 
           return (
             <div
               key={act.id}
-              className="group rounded-xl transition-all duration-200"
-              style={{
-                border: isActive
-                  ? '1px solid rgba(252,76,2,0.5)'
-                  : hasGps
-                  ? '1px solid var(--color-border)'
-                  : '1px solid var(--color-border)',
-                background: isActive
-                  ? 'var(--color-strava-subtle)'
-                  : 'var(--color-surface-elevated)',
-                opacity: !hasGps ? 0.6 : 1,
-              }}
+              className={`rounded-xl border bg-card text-card-foreground shadow-sm overflow-hidden transition-all duration-200 ${
+                isExpanded
+                  ? 'border-primary/40 ring-1 ring-primary/10'
+                  : 'border-border/30 hover:border-border'
+              }`}
+              style={{ opacity: !hasGps ? 0.65 : 1 }}
             >
+              {/* ── Collapsed header row ─────────────────────────────── */}
               <button
-                onClick={() => handleClick(act)}
-                disabled={!hasGps}
-                className="w-full text-left p-3.5 disabled:cursor-not-allowed"
+                onClick={() => handleCardClick(act)}
+                disabled={!hasGps && expandedId !== act.id}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 text-left focus:outline-none ${
+                  hasGps ? 'cursor-pointer' : 'cursor-default'
+                }`}
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div
-                    className="mt-0.5 p-1.5 rounded-lg shrink-0 transition-colors"
-                    style={{
-                      background: isActive ? 'rgba(252,76,2,0.2)' : 'var(--color-surface-overlay)',
-                    }}
-                  >
-                    <Activity
-                      className="w-3.5 h-3.5 transition-colors"
-                      style={{ color: isActive ? 'var(--color-strava)' : 'var(--color-text-muted)' }}
-                    />
-                  </div>
-                  <div className="flex-1 overflow-hidden">
-                    <p className="text-sm font-semibold truncate" style={{ color: 'var(--color-text-primary)' }}>
-                      {act.nazwa_treningu}
-                    </p>
-                    <div className="flex items-center gap-3 mt-1.5 text-[11px] font-medium" style={{ color: 'var(--color-text-muted)' }}>
-                      <span className="flex items-center gap-1">
-                        <RouteIcon className="w-3 h-3" style={{ color: 'var(--color-success)' }} />
-                        <span className="font-bold" style={{ color: 'var(--color-success)' }}>{act.dystans_km} km</span>
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Calendar className="w-3 h-3" />
-                        {act.data}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="shrink-0 mt-0.5">
-                    {hasGps
-                      ? <MapPin className="w-3.5 h-3.5 transition-colors" style={{ color: isActive ? 'var(--color-strava)' : 'var(--color-text-muted)' }} />
-                      : <span className="text-[9px]" style={{ color: 'var(--color-text-muted)' }}>bez GPS</span>
-                    }
-                  </div>
-                </div>
-                {isActive && (
-                  <p className="mt-2 text-[10px] font-medium" style={{ color: 'var(--color-strava)' }}>
-                    ✓ Trasa wyświetlona na mapie
+                {/* Activity icon */}
+                <Activity
+                  className={`w-4 h-4 shrink-0 transition-colors ${
+                    isExpanded ? 'text-primary' : 'text-muted-foreground'
+                  }`}
+                />
+
+                {/* Left: Name + date + optional badge */}
+                <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+                  <p className="text-xs font-semibold text-foreground truncate leading-tight">
+                    {act.nazwa_treningu}
                   </p>
+                  <p className="text-[10px] text-muted-foreground leading-none">
+                    {act.data}
+                  </p>
+                  {!hasGps && (
+                    <span className="inline-flex items-center w-max bg-muted text-muted-foreground border border-border/50 rounded-md px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider mt-0.5">
+                      BEZ GPS
+                    </span>
+                  )}
+                </div>
+
+                {/* Neon distance */}
+                <div className="flex items-baseline gap-0.5 shrink-0">
+                  <span className="text-xl font-extrabold text-primary leading-none tabular-nums">
+                    {act.dystans_km}
+                  </span>
+                  <span className="text-[9px] font-black text-muted-foreground uppercase tracking-widest leading-none ml-0.5">
+                    km
+                  </span>
+                </div>
+
+                {/* Chevron (only if has GPS) */}
+                {hasGps && (
+                  <ChevronDown
+                    className={`w-3.5 h-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ${
+                      isExpanded ? 'rotate-180 text-primary' : ''
+                    }`}
+                  />
                 )}
               </button>
 
-              <div className="px-3.5 pb-3 flex flex-col gap-1.5">
-                {/* Zapytaj Kasię */}
-                <button
-                  onClick={(e) => handleAnalyze(e, act)}
-                  className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[11px] font-semibold
-                             opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all duration-200"
-                  style={{
-                    background: 'var(--color-accent-subtle)',
-                    border: '1px solid rgba(99,102,241,0.2)',
-                    color: 'var(--color-accent)',
-                  }}
-                >
-                  <Sparkles className="w-3 h-3" />
-                  Zapytaj Kasię o analizę
-                </button>
+              {/* ── Expanded section: action buttons ─────────────────── */}
+              {isExpanded && (
+                <div className="border-t border-border/30 bg-muted/20">
+                  <div
+                    className="flex items-center gap-1.5 px-3 py-2"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <span className="text-[8px] font-black uppercase tracking-widest text-muted-foreground mr-auto">
+                      STRAVA
+                    </span>
 
-                {/* Zapisz trasę — tylko gdy jest GPS */}
-                {hasGps && (
-                  <SaveRouteWidget
-                    size="xs"
-                    onSave={buildSaveHandler(act)}
-                    defaultName={`${act.nazwa_treningu} – ${act.dystans_km} km`}
-                    className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200"
-                  />
-                )}
-              </div>
+                    {/* Pokaż na mapie */}
+                    {hasGps && (
+                      <button
+                        onClick={() => onLoadRoute(act.slad_gps_geojson)}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg border border-border bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground transition-all cursor-pointer shrink-0"
+                        title="Pokaż na mapie"
+                      >
+                        <MapPin className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+
+                    {/* Analiza Kasi */}
+                    <button
+                      onClick={(e) => handleAnalyze(e, act)}
+                      className="w-7 h-7 flex items-center justify-center rounded-lg border border-border bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground transition-all cursor-pointer shrink-0"
+                      title="Analiza Kasi"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-primary" />
+                    </button>
+
+                    {/* Zapisz trasę */}
+                    {hasGps && (
+                      <SaveRouteWidget
+                        iconOnly
+                        size="xs"
+                        onSave={buildSaveHandler(act)}
+                        defaultName={`${act.nazwa_treningu} – ${act.dystans_km} km`}
+                        className="border-border bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted"
+                      />
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}

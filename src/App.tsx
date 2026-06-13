@@ -2,9 +2,8 @@ import { useState } from 'react';
 import { MapComponent } from './components/MapComponent';
 import { Sidebar } from './components/Sidebar';
 import { TopNavbar } from './components/TopNavbar';
-import { LeftNavRail } from './components/LeftNavRail';
-import { OnboardingModal } from './components/OnboardingModal';
 import type { ActiveTab } from './components/LeftNavRail';
+import { OnboardingModal } from './components/OnboardingModal';
 import { LatLngExpression } from 'leaflet';
 import { exportGpx } from './utils/exportGpx';
 import { useRouteSegments } from './hooks/useRouteSegments';
@@ -100,17 +99,35 @@ function App() {
       const lat0 = Array.isArray(startPt) ? startPt[0] : (startPt as any).lat;
       const lng0 = Array.isArray(startPt) ? startPt[1] : (startPt as any).lng;
 
-      const response = await fetch('http://localhost:8000/api/generate-loop', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lat: lat0, lng: lng0, distance_km: Number(targetDistance) }),
-      });
+      let response;
+      try {
+        response = await fetch('http://localhost:8000/api/generate-loop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lat: lat0, lng: lng0, distance_km: Number(targetDistance) }),
+        });
+      } catch (networkErr) {
+        throw new Error('NETWORK_ERROR');
+      }
 
-      if (!response.ok) throw new Error('API Error');
+      if (!response.ok) {
+        let errMsg = 'Nieznany błąd serwera.';
+        try {
+          const errData = await response.json();
+          if (errData && errData.detail) {
+            errMsg = errData.detail;
+          }
+        } catch (_) {}
+        throw new Error(errMsg);
+      }
       setRouteData(await response.json());
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert('Nie udało się wygenerować pętli z API. Upewnij się, że FastAPI działa!');
+      if (err.message === 'NETWORK_ERROR') {
+        alert('Nie udało się połączyć z serwerem. Upewnij się, że FastAPI działa!');
+      } else {
+        alert(`Błąd generowania pętli: ${err.message}`);
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -125,17 +142,33 @@ function App() {
   const handleSaveCurrentRoute = async (name?: string) => {
     if (!user) return;
 
-    // Pobierz geometrię: preferuj wygenerowany route, fallback na waypoints
+    // Pobierz geometrię:
+    // 1. Wygenerowana pętla (routeData z backendu) → pełna geometria z GeoJSON
+    // 2. Ręcznie rysowana trasa (Mapper + OSRM) → użyj geometrii segmentów
+    //    (ta sama logika co eksport GPX — zawiera setki punktów snap do dróg)
+    // 3. Fallback → surowe waypointy (ostateczność)
     let coords: [number, number][] = [];
+
     if (routeData?.features?.[0]?.geometry?.coordinates) {
+      // Pętla wygenerowana przez AI — geometry.coordinates już w formacie [lng, lat]
       coords = routeData.features[0].geometry.coordinates as [number, number][];
+    } else if (segments.length > 0 && segments.some(s => s.geojson.length > 0)) {
+      // Ręcznie rysowana trasa — bierzemy pełną geometrię OSRM (snap do ulic)
+      // seg.geojson to LatLngExpression[] czyli [lat, lng] → zamieniamy na [lng, lat] dla GeoJSON
+      const allPoints = segments.flatMap(s => s.geojson);
+      coords = allPoints.map(ll => {
+        if (Array.isArray(ll)) return [ll[1], ll[0]] as [number, number];   // [lat,lng] → [lng,lat]
+        return [(ll as any).lng, (ll as any).lat] as [number, number];
+      });
     } else if (waypoints.length >= 2) {
+      // Ostatni fallback — tylko punkty kliknięć (brak geometrii)
       coords = waypoints.map(wp => {
         const ll = wp.latlng;
         if (Array.isArray(ll)) return [ll[1], ll[0]] as [number, number];
         return [(ll as any).lng, (ll as any).lat] as [number, number];
       });
     }
+
     if (coords.length < 2) return;
 
     const geojson = {
@@ -174,12 +207,9 @@ function App() {
       <TopNavbar onNavigate={setActiveTab} activeTab={activeTab} />
 
       {/* ── Below navbar ─────────────────────────────────────── */}
-      <div className="flex flex-1 overflow-hidden" style={{ marginTop: '56px' }}>
-        {/* Left Nav Rail (68px) */}
-        <LeftNavRail activeTab={activeTab} onTabChange={setActiveTab} />
-
+      <div className="flex flex-1 overflow-hidden" style={{ marginTop: '64px' }}>
         {/* Map — fills full remaining area */}
-        <div className="relative flex-1" style={{ marginLeft: '68px' }}>
+        <div className="relative flex-1">
           <MapComponent
             waypoints={waypoints}
             segments={segments}
@@ -196,6 +226,7 @@ function App() {
       {/* Sidebar — fixed glass panel over map (portal-like, fixed to viewport) */}
       <Sidebar
         activeTab={activeTab}
+        onNavigate={setActiveTab}
         distance={displayedDistance}
         pointsCount={routeData ? (routeData.features?.[0]?.geometry?.coordinates?.length ?? 0) : waypoints.length}
         currentCity={location.cityName}

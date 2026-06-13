@@ -11,6 +11,7 @@ import type { ActiveTab } from './LeftNavRail';
 
 export interface SidebarProps {
   activeTab: ActiveTab;
+  onNavigate: (tab: ActiveTab) => void;
   distance: string;
   pointsCount: number;
   currentCity: string;
@@ -29,6 +30,7 @@ export interface SidebarProps {
 
 export const Sidebar = ({
   activeTab,
+  onNavigate,
   distance,
   pointsCount,
   currentCity,
@@ -51,6 +53,7 @@ export const Sidebar = ({
 
   const handleRequestAnalysis = (activityId: number, activityName: string) => {
     setAnalysisRequest({ activityId, activityName });
+    onNavigate('assistant');
   };
 
   // Geocoding search
@@ -103,37 +106,34 @@ export const Sidebar = ({
 
   return (
     <aside
-      className="fixed flex flex-col overflow-hidden"
+      className="fixed flex flex-col overflow-hidden border-r border-border"
       style={{
-        top: '56px',
-        left: '68px',
+        top: '64px',
+        left: 0,
         bottom: 0,
-        width: '308px',
+        width: '400px',
         zIndex: 1002,
-        background: 'var(--glass-bg)',
-        borderRight: '1px solid var(--glass-border)',
-        backdropFilter: 'blur(20px)',
-        WebkitBackdropFilter: 'blur(20px)',
-        boxShadow: '4px 0 32px rgba(0,0,0,0.20)',
+        backgroundColor: 'var(--color-surface)',
       }}
     >
       {/* Content Panel */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar p-4 flex flex-col gap-4">
+      <div
+        className={`flex-1 custom-scrollbar p-4 flex flex-col gap-4 ${
+          (activeTab === 'planner' || activeTab === 'assistant') ? 'overflow-hidden' : 'overflow-y-auto'
+        }`}
+      >
 
         {/* ── MAPPER ──────────────────────────────────────────── */}
         {activeTab === 'mapper' && (
           <>
             {/* Section header */}
-            <div>
-              <h2
-                className="text-base font-bold tracking-tight"
-                style={{ color: 'var(--color-text-primary)' }}
-              >
+            <div className="flex flex-col gap-0.5">
+              <h2 className="text-xl font-black tracking-tight text-primary font-display">
                 Planowanie Trasy
               </h2>
-              <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+              <p className="text-xs text-secondary">
                 Punkt startowy:{' '}
-                <span className="font-semibold" style={{ color: 'var(--color-success)' }}>
+                <span className="font-bold" style={{ color: 'var(--color-accent)' }}>
                   {currentCity}
                 </span>
               </p>
@@ -143,35 +143,24 @@ export const Sidebar = ({
             <div className="flex flex-col gap-2 relative">
               <div className="flex gap-2">
                 <div className="relative flex-1">
-                  <Search
-                    className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2"
-                    style={{ color: 'var(--color-text-muted)' }}
-                  />
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Wpisz miasto..."
-                    className="input-base pl-9"
+                    className="input-base pl-9 w-full"
                   />
                   {isSearching && (
-                    <Loader2
-                      className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 animate-spin"
-                      style={{ color: 'var(--color-text-muted)' }}
-                    />
+                    <Loader2 className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-muted" />
                   )}
                 </div>
                 <button
                   onClick={handleLocateMe}
                   title="Lokalizuj mnie"
-                  className="px-3 rounded-xl flex items-center justify-center transition-all duration-150 hover:scale-105 active:scale-95"
-                  style={{
-                    background: 'var(--color-surface-overlay)',
-                    border: '1px solid var(--color-border)',
-                    color: 'var(--color-accent)',
-                  }}
+                  className="w-10 h-10 shrink-0 rounded-[2px] flex items-center justify-center transition-colors border border-border bg-surface-overlay text-accent hover:bg-surface-elevated cursor-pointer"
                 >
-                  <Crosshair className="w-5 h-5" />
+                  <Crosshair className="w-4 h-4" />
                 </button>
               </div>
 
@@ -209,38 +198,26 @@ export const Sidebar = ({
             </div>
 
             {/* Distance display */}
-            <div
-              className="flex items-center justify-between rounded-xl px-4 py-3"
-              style={{
-                background: 'var(--color-surface-overlay)',
-                border: '1px solid var(--color-border)',
-              }}
-            >
-              <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Dystans trasy</span>
-              <span className="text-2xl font-bold" style={{ color: 'var(--color-success)' }}>{distance} km</span>
+            <div className="flex items-center justify-between p-4 border border-border">
+              <span className="text-sm font-bold text-secondary">Dystans trasy</span>
+              <span className="text-3xl font-black font-display tracking-tighter" style={{ color: 'var(--color-accent)' }}>{distance} km</span>
             </div>
 
             {/* Points + Undo/Clear */}
-            <div className="flex justify-between items-center text-xs px-1" style={{ color: 'var(--color-text-muted)' }}>
-              <span>Punktów: <strong style={{ color: 'var(--color-text-secondary)' }}>{pointsCount}</strong></span>
-              <div className="flex items-center gap-3">
+            <div className="flex justify-between items-center text-[11px] font-mono-custom uppercase tracking-widest text-muted px-1 mt-1">
+              <span>PUNKTÓW: <strong className="text-primary">{pointsCount}</strong></span>
+              <div className="flex items-center gap-4">
                 <button
                   onClick={onUndo}
                   disabled={pointsCount === 0}
-                  className="flex items-center gap-1 transition-opacity disabled:opacity-30"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                  onMouseOver={(e) => (e.currentTarget.style.color = 'var(--color-text-primary)')}
-                  onMouseOut={(e) => (e.currentTarget.style.color = 'var(--color-text-secondary)')}
+                  className="flex items-center gap-1.5 transition-colors disabled:opacity-30 text-secondary hover:text-primary bg-transparent border-none cursor-pointer p-0 uppercase"
                 >
-                  <Undo2 className="w-4 h-4" /> Cofnij
+                  <Undo2 className="w-3.5 h-3.5" /> Cofnij
                 </button>
                 {pointsCount > 0 && (
                   <button
                     onClick={onClear}
-                    className="transition-opacity"
-                    style={{ color: '#f87171' }}
-                    onMouseOver={(e) => (e.currentTarget.style.opacity = '0.7')}
-                    onMouseOut={(e) => (e.currentTarget.style.opacity = '1')}
+                    className="text-danger hover:opacity-70 transition-opacity bg-transparent border-none cursor-pointer p-0 uppercase"
                   >
                     Wyczyść
                   </button>
@@ -252,14 +229,9 @@ export const Sidebar = ({
             <button
               onClick={onExport}
               disabled={pointsCount < 2}
-              className="w-full flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed hover:scale-[1.01] active:scale-[0.99]"
-              style={{
-                background: 'var(--color-surface-overlay)',
-                border: '1px solid var(--color-border)',
-                color: 'var(--color-text-primary)',
-              }}
+              className="w-full flex items-center justify-center gap-2 py-2.5 text-xs font-bold border border-border bg-transparent text-primary hover:bg-surface-elevated transition-colors cursor-pointer mt-1"
             >
-              <Download className="w-4 h-4" /> Eksportuj GPX
+              <Download className="w-3.5 h-3.5" /> Eksportuj GPX
             </button>
 
             {/* ── Zapisz trasę do biblioteki ── */}
@@ -271,21 +243,19 @@ export const Sidebar = ({
             )}
 
             {/* Generate Loop */}
-            <div
-              className="flex flex-col gap-3 pt-4"
-              style={{ borderTop: '1px solid var(--color-border)' }}
-            >
-              <div>
-                <h3 className="text-sm font-bold" style={{ color: 'var(--color-text-primary)' }}>
+            <div className="flex flex-col gap-3 mt-1">
+              <div className="w-full h-px bg-primary opacity-20 my-1" />
+              <div className="flex flex-col">
+                <h3 className="text-lg font-black text-primary font-display tracking-tight">
                   Generuj Smart Pętlę
                 </h3>
-                <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                <p className="text-[11px] text-secondary">
                   AI dobierze optymalną trasę
                 </p>
               </div>
-              <div className="flex flex-col gap-1.5">
-                <label htmlFor="distance" className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-                  Docelowy dystans (km)
+              <div className="flex flex-col gap-1.5 mt-1">
+                <label htmlFor="distance" className="text-[10px] font-bold uppercase tracking-widest text-secondary font-mono-custom">
+                  DOCELOWY DYSTANS (KM)
                 </label>
                 <input
                   id="distance"
@@ -293,28 +263,21 @@ export const Sidebar = ({
                   value={targetDistance}
                   onChange={(e) => setTargetDistance(e.target.value ? Number(e.target.value) : '')}
                   placeholder="np. 15"
-                  className="input-base"
+                  className="input-base p-2.5 text-sm"
                 />
               </div>
               {pointsCount === 0 && (
-                <p className="text-xs" style={{ color: '#fbbf24' }}>
+                <p className="text-xs text-warning mt-0.5">
                   Najpierw zaznacz środek pętli na mapie.
                 </p>
               )}
               <button
                 onClick={onGenerateLoop}
                 disabled={pointsCount === 0 || !targetDistance || isGenerating}
-                className="w-full flex justify-center items-center gap-2 rounded-xl px-4 py-3 text-sm font-bold text-white transition-all duration-200 shadow-lg disabled:opacity-40 disabled:cursor-not-allowed hover:-translate-y-0.5 hover:shadow-xl active:translate-y-0 disabled:hover:translate-y-0"
-                style={{
-                  background: 'linear-gradient(135deg, #059669, #10b981)',
-                  boxShadow: '0 4px 14px rgba(16,185,129,0.25)',
-                }}
+                className="w-full py-3 mt-1 text-xs font-bold uppercase tracking-widest border-none cursor-pointer transition-opacity disabled:opacity-50"
+                style={{ backgroundColor: 'var(--color-accent)', color: 'var(--color-accent-fg)' }}
               >
-                {isGenerating ? (
-                  <><Loader2 className="w-4 h-4 animate-spin" /> Generowanie…</>
-                ) : (
-                  'Wyznacz Pętlę (Smart)'
-                )}
+                {isGenerating ? <><Loader2 className="w-3.5 h-3.5 animate-spin inline mr-2" /> WYZNACZAM...</> : 'WYZNACZ PĘTLĘ (SMART)'}
               </button>
             </div>
           </>
@@ -324,8 +287,8 @@ export const Sidebar = ({
         {activeTab === 'routes' && (
           <>
             <div>
-              <h2 className="text-base font-bold" style={{ color: 'var(--color-text-primary)' }}>Twoje Trasy</h2>
-              <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>Zapisana biblioteka tras</p>
+              <h2 className="text-xl font-black tracking-tight text-primary font-display">Twoje Trasy</h2>
+              <p className="text-xs mt-0.5 text-secondary">Zapisana biblioteka tras</p>
             </div>
             <SavedRoutesPanel userId={user?.user_id ?? null} onLoadRoute={onLoadSavedRoute} />
           </>
@@ -335,8 +298,8 @@ export const Sidebar = ({
         {activeTab === 'strava' && (
           <>
             <div>
-              <h2 className="text-base font-bold" style={{ color: 'var(--color-text-primary)' }}>Treningi Strava</h2>
-              <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>Ostatnie aktywności z konta</p>
+              <h2 className="text-xl font-black tracking-tight text-primary font-display">Treningi Strava</h2>
+              <p className="text-xs mt-0.5 text-secondary">Ostatnie aktywności z konta</p>
             </div>
             <StravaActivitiesPanel
               onLoadRoute={onLoadSavedRoute}
@@ -349,11 +312,11 @@ export const Sidebar = ({
         {activeTab === 'planner' && (
           <>
             <div>
-              <h2 className="text-base font-bold" style={{ color: 'var(--color-text-primary)' }}>Planer & Cele</h2>
-              <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>Zarządzaj startami i planem treningowym</p>
+              <h2 className="text-xl font-black tracking-tight text-primary font-display">Planer & Cele</h2>
+              <p className="text-xs mt-0.5 text-secondary">Zarządzaj startami i planem treningowym</p>
             </div>
             <PanelErrorBoundary label="Planer">
-              <PlannerPanel />
+              <PlannerPanel onRequestAnalysis={handleRequestAnalysis} />
             </PanelErrorBoundary>
           </>
         )}

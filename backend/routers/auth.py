@@ -212,12 +212,15 @@ async def get_user_activities(
 
     headers = {"Authorization": f"Bearer {access_token}"}
 
+    # Pobieramy więcej, żeby po przefiltrowaniu mieć wystarczająco biegów
+    fetch_limit = min(max(limit * 3, 50), 200)
+
     async with httpx.AsyncClient() as client:
         # 1. Lista aktywności
         acts_resp = await client.get(
             "https://www.strava.com/api/v3/athlete/activities",
             headers=headers,
-            params={"per_page": limit, "page": 1},
+            params={"per_page": fetch_limit, "page": 1},
         )
 
     if acts_resp.status_code != 200:
@@ -228,6 +231,12 @@ async def get_user_activities(
 
     async with httpx.AsyncClient() as client:
         for act in activities_raw:
+            # Zostawiamy tylko treningi biegowe
+            act_type = act.get("type") or ""
+            sport_type = act.get("sport_type") or ""
+            if "run" not in act_type.lower() and "run" not in sport_type.lower():
+                continue
+
             # Pobieramy stream GPS tylko dla aktywności z trasą
             geojson = None
             if act.get("map", {}).get("summary_polyline"):
@@ -255,6 +264,9 @@ async def get_user_activities(
                 data=act.get("start_date_local", "")[:10],  # YYYY-MM-DD
                 slad_gps_geojson=geojson,
             ))
+
+            if len(result) >= limit:
+                break
 
     return result
 

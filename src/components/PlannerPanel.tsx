@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import Calendar from 'react-calendar';
-import { Loader2, Target, Plus, Trash2, Sparkles, CheckCircle, Clock, Zap, BrainCircuit, X, AlertCircle, Settings2, ChevronDown, Activity, Flame, Wind, Timer, MapPin, Heart, Route } from 'lucide-react';
+import { Loader2, Target, Plus, Trash2, Sparkles, CheckCircle, Clock, BrainCircuit, X, AlertCircle, Activity, Flame, Wind, Timer, MapPin, Heart, CalendarDays as CalendarIcon, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+
 import { useGeneratePlan } from '../hooks/useGeneratePlan';
+import { SaveRouteWidget } from './SaveRouteWidget';
 
 const API = 'http://localhost:8000';
 
@@ -28,6 +29,8 @@ interface CalendarEvent {
   distance_km: number | null;
   description: string | null;
   goal_id: number | null;
+  avg_heart_rate:  number | null;
+  avg_pace:        string | null;
   target_pace:     string | null;
   heart_rate_zone: string | null;
   // v3 structured phases
@@ -71,7 +74,7 @@ const toDateStr = (d: Date | null | undefined): string => {
 };
 
 const TYPE_COLORS: Record<string, { color: string; bg: string }> = {
-  'Easy Run':  { color: '#34d399', bg: 'rgba(52,211,153,0.12)' },
+  'Easy Run':  { color: '#3100FF', bg: 'rgba(49,0,255,0.08)' },
   'Long Run':  { color: '#60a5fa', bg: 'rgba(96,165,250,0.12)' },
   'Interwały': { color: '#f87171', bg: 'rgba(248,113,113,0.12)' },
   'Tempo Run': { color: '#fbbf24', bg: 'rgba(251,191,36,0.12)' },
@@ -84,435 +87,213 @@ const getTypeStyle = (type: string) => {
   return key ? TYPE_COLORS[key] : { color: '#94a3b8', bg: 'rgba(148,163,184,0.1)' };
 };
 
-// ── Workout Drawer ─────────────────────────────────────────────────────────
-interface WorkoutDrawerProps {
-  event: CalendarEvent | null;
-  onClose: () => void;
-  onSaveRoute?: (eventId: string, name: string) => Promise<void>;
+// ── Custom Calendar ───────────────────────────────────────────────────────────
+const WEEKDAYS = ['Pn', 'Wt', 'Śr', 'Cz', 'Pt', 'So', 'Nd'];
+const MONTHS_PL = ['Styczeń','Luty','Marzec','Kwiecień','Maj','Czerwiec','Lipiec','Sierpień','Wrzesień','Październik','Listopad','Grudzień'];
+
+interface DayDot { color: string; }
+interface CustomCalendarProps {
+  value: Date | null;
+  onChange: (d: Date) => void;
+  eventsByDate: Record<string, { is_completed: boolean; is_rest_day?: boolean | null; type?: string | null; distance_km?: number | null }[]>;
 }
 
-/**
- * PhaseRow v2 — Runna-style tile.
- *
- * Anatomy (top → bottom):
- *  ┌─────────────────────────────────────────────────────┐
- *  │ 🔥 ROZGRZEWKA                              [badge] │  ← header
- *  ├─────────────────────────────────────────────────────┤
- *  │  1.5 km @ 6:10                                   │  ← METRIC HERO
- *  │  ❤ 115–130 bpm                                    │  ← HR line
- *  ├─────────────────────────────────────────────────────┤
- *  │ « Możesz swobodnie rozmawiać pełnymi zdaniami »   │  ← coach cue
- *  └─────────────────────────────────────────────────────┘
- */
-const PhaseRow: React.FC<{
-  icon:         React.ReactNode;
-  label:        string;
-  accentColor:  string;
-  distKm?:      number | null;
-  pace?:        string | null;         // exact_pace / target_pace_min_km
-  hrTarget?:    string | null;         // heart_rate_target
-  coachCue?:    string | null;         // audio_coach_cue / beginner_explanation
-}> = ({ icon, label, accentColor, distKm, pace, hrTarget, coachCue }) => (
-  <div style={{
-    borderRadius: 16,
-    border: `1px solid ${accentColor}22`,
-    background: 'var(--color-surface-overlay, rgba(255,255,255,0.03))',
-    overflow: 'hidden',
-    boxShadow: `0 1px 0 ${accentColor}10`,
-  }}>
+const CustomCalendar: React.FC<CustomCalendarProps> = ({ value, onChange, eventsByDate }) => {
+  const today = new Date();
+  const [viewYear, setViewYear] = React.useState(value ? value.getFullYear() : today.getFullYear());
+  const [viewMonth, setViewMonth] = React.useState(value ? value.getMonth() : today.getMonth());
 
-    {/* ── Header strip ────────────────────────────── */}
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 6,
-      padding: '7px 14px',
-      background: `${accentColor}10`,
-      borderBottom: `1px solid ${accentColor}18`,
-    }}>
-      <span style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>{icon}</span>
-      <span style={{
-        fontSize: 10, fontWeight: 800,
-        textTransform: 'uppercase', letterSpacing: '0.1em',
-        color: accentColor,
-      }}>{label}</span>
-    </div>
+  // Sync view when external value changes month
+  React.useEffect(() => {
+    if (value) { setViewYear(value.getFullYear()); setViewMonth(value.getMonth()); }
+  }, [value]);
 
-    {/* ── METRIC HERO ─────────────────────────────── */}
-    <div style={{ padding: '14px 16px 0' }}>
-      {/* Distance @ Pace on one line, big and bold */}
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
-        {distKm != null ? (
-          <>
-            <span style={{
-              fontSize: 28, fontWeight: 900, lineHeight: 1,
-              color: 'var(--color-text-primary)',
-              fontVariantNumeric: 'tabular-nums',
-            }}>{distKm}</span>
-            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-text-muted)' }}>km</span>
-          </>
-        ) : null}
-        {pace ? (
-          <>
-            <span style={{ fontSize: 15, color: accentColor, fontWeight: 600, opacity: 0.6, padding: '0 2px' }}>@</span>
-            <span style={{
-              fontSize: 22, fontWeight: 900, lineHeight: 1,
-              color: accentColor,
-              fontVariantNumeric: 'tabular-nums',
-            }}>{pace}</span>
-            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)', alignSelf: 'flex-end', paddingBottom: 2 }}>min/km</span>
-          </>
-        ) : null}
-        {!distKm && !pace && (
-          <span style={{ fontSize: 14, color: 'var(--color-text-muted)', fontStyle: 'italic' }}>—</span>
-        )}
+  const prevMonth = () => { if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1); } else setViewMonth(m => m - 1); };
+  const nextMonth = () => { if (viewMonth === 11) { setViewMonth(0); setViewYear(y => y + 1); } else setViewMonth(m => m + 1); };
+
+  // Build grid: 6 rows × 7 cols, starting Monday
+  const firstDay = new Date(viewYear, viewMonth, 1);
+  const startOffset = (firstDay.getDay() + 6) % 7; // Mon=0
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const totalCells = Math.ceil((startOffset + daysInMonth) / 7) * 7;
+
+  const cells: (Date | null)[] = [];
+  for (let i = 0; i < totalCells; i++) {
+    const dayNum = i - startOffset + 1;
+    if (dayNum < 1 || dayNum > daysInMonth) {
+      // neighboring month cells
+      const d = new Date(viewYear, viewMonth, dayNum);
+      cells.push(d);
+    } else {
+      cells.push(new Date(viewYear, viewMonth, dayNum));
+    }
+  }
+
+  const toStr = (d: Date) => d.toISOString().slice(0, 10);
+  const todayStr = toStr(today);
+  const selectedStr = value ? toStr(value) : '';
+
+  const getDots = (dateStr: string): DayDot[] => {
+    const evs = (eventsByDate[dateStr] ?? []).filter(
+      ev => !ev.is_rest_day && !ev.type?.toLowerCase().includes('rest')
+    );
+    return evs.map(ev => ({ color: ev.is_completed ? '#fc4c02' : '#3100FF' }));
+  };
+
+  const getDistLabel = (dateStr: string): string | null => {
+    const evs = (eventsByDate[dateStr] ?? []).filter(
+      ev => !ev.is_rest_day && !ev.type?.toLowerCase().includes('rest')
+    );
+    const total = evs.reduce((s, e) => s + (e.distance_km ?? 0), 0);
+    return total > 0 ? `${Math.round(total * 10) / 10}` : null;
+  };
+
+  return (
+    <div className="custom-cal">
+      {/* Navigation */}
+      <div className="custom-cal__nav">
+        <button onClick={prevMonth} className="custom-cal__nav-btn" aria-label="Poprzedni miesiąc">
+          <ChevronLeft className="w-3.5 h-3.5" />
+        </button>
+        <span className="custom-cal__month-label">
+          {MONTHS_PL[viewMonth]} {viewYear}
+        </span>
+        <button onClick={nextMonth} className="custom-cal__nav-btn" aria-label="Następny miesiąc">
+          <ChevronRight className="w-3.5 h-3.5" />
+        </button>
       </div>
 
-      {/* ❤ HR line — sits directly under the metric */}
+      {/* Weekday headers */}
+      <div className="custom-cal__weekdays">
+        {WEEKDAYS.map(d => <div key={d} className="custom-cal__wd">{d}</div>)}
+      </div>
+
+      {/* Day grid */}
+      <div className="custom-cal__grid">
+        {cells.map((date, i) => {
+          if (!date) return <div key={i} className="custom-cal__cell custom-cal__cell--empty" />;
+          const dStr = toStr(date);
+          const isCurrentMonth = date.getMonth() === viewMonth;
+          const isToday = dStr === todayStr;
+          const isSelected = dStr === selectedStr;
+          const dots = isCurrentMonth ? getDots(dStr) : [];
+          const distLabel = isCurrentMonth ? getDistLabel(dStr) : null;
+
+          return (
+            <button
+              key={i}
+              onClick={() => onChange(date)}
+              className={[
+                'custom-cal__cell',
+                !isCurrentMonth && 'custom-cal__cell--other',
+                isToday && 'custom-cal__cell--today',
+                isSelected && 'custom-cal__cell--selected',
+                dots.length > 0 && 'custom-cal__cell--has-events',
+              ].filter(Boolean).join(' ')}
+            >
+              <span className="custom-cal__day-num">{date.getDate()}</span>
+              {distLabel && (
+                <span className="custom-cal__dist">{distLabel}</span>
+              )}
+              {dots.length > 0 && (
+                <div className="custom-cal__dots">
+                  {dots.slice(0, 4).map((dot, di) => (
+                    <span key={di} className="custom-cal__dot" style={{ background: dot.color }} />
+                  ))}
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+
+// ── Compact inline phase row — used inside the day-detail panel (no overlay) ──
+const InlinePhaseRow: React.FC<{
+  icon:        React.ReactNode;
+  label:       string;
+  accentColor: string;
+  distKm?:     number | null;
+  pace?:       string | null;
+  hrTarget?:   string | null;
+  coachCue?:   string | null;
+}> = ({ icon, label, accentColor, distKm, pace, hrTarget, coachCue }) => (
+  <div
+    className="rounded-[2px] border overflow-hidden"
+    style={{
+      background: 'var(--color-surface-elevated)',
+      borderColor: 'var(--color-border)',
+    }}
+  >
+    {/* Header strip — accent tint using CSS var overlay */}
+    <div
+      className="flex items-center gap-1.5 px-2 py-1 border-b"
+      style={{
+        background: 'var(--phase-header-bg, var(--color-surface-overlay))',
+        /* We rely on inline accentColor to tint via box-shadow trick below */
+        borderColor: 'var(--color-border)',
+        boxShadow: `inset 3px 0 0 0 ${accentColor}`,
+      }}
+    >
+      <span className="shrink-0 flex items-center">{icon}</span>
+      <span className="text-[9px] font-black uppercase tracking-widest" style={{ color: accentColor }}>{label}</span>
+    </div>
+    {/* Metric line: dist @ pace  ❤ hr */}
+    <div className="px-2 py-1.5 flex items-baseline gap-1.5 flex-wrap">
+      {distKm != null && (
+        <>
+          <span className="text-lg font-extrabold tabular-nums leading-none" style={{ color: 'var(--color-text-primary)' }}>{distKm}</span>
+          <span className="text-[8px] font-bold uppercase mr-1" style={{ color: 'var(--color-text-muted)' }}>km</span>
+        </>
+      )}
+      {pace && (
+        <>
+          <span className="text-[9px]" style={{ color: 'var(--color-text-muted)' }}>@</span>
+          <span className="text-sm font-extrabold tabular-nums leading-none" style={{ color: accentColor }}>{pace}</span>
+          <span className="text-[8px] font-bold uppercase" style={{ color: 'var(--color-text-muted)' }}>min/km</span>
+        </>
+      )}
+      {!distKm && !pace && <span className="text-[10px] italic" style={{ color: 'var(--color-text-muted)' }}>—</span>}
       {hrTarget && (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 5,
-          marginTop: 6,
-        }}>
-          <Heart style={{ width: 12, height: 12, color: '#fb7185', flexShrink: 0 }} />
-          <span style={{
-            fontSize: 12, fontWeight: 700,
-            color: '#fb7185',
-            fontVariantNumeric: 'tabular-nums',
-          }}>{hrTarget}</span>
-        </div>
+        <span className="ml-auto flex items-center gap-0.5 shrink-0">
+          <Heart className="w-2.5 h-2.5" style={{ color: 'var(--color-danger)' }} />
+          <span className="text-[9px] font-bold tabular-nums" style={{ color: 'var(--color-danger)' }}>{hrTarget}</span>
+        </span>
       )}
     </div>
-
-    {/* ── Coach Cue card ────────────────────────────── */}
-    {coachCue ? (
-      <div style={{
-        margin: '10px 12px 12px',
-        borderRadius: 10,
-        background: 'rgba(148,163,184,0.07)',
-        border: '1px solid rgba(148,163,184,0.14)',
-        padding: '8px 12px',
-        display: 'flex', gap: 8, alignItems: 'flex-start',
-      }}>
-        {/* mic / coach icon */}
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#94a3b8"
-          strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-          style={{ flexShrink: 0, marginTop: 2 }}>
-          <path d="M12 2a3 3 0 0 1 3 3v7a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3Z"/>
-          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-          <line x1="12" y1="19" x2="12" y2="22"/>
-        </svg>
-        <p style={{
-          margin: 0,
-          fontSize: 12,
-          lineHeight: 1.55,
-          color: 'var(--color-text-muted)',
-          fontStyle: 'italic',
-        }}>{coachCue}</p>
+    {/* Coach cue */}
+    {coachCue && (
+      <div
+        className="px-2 pb-1.5 text-[9px] italic leading-snug border-t pt-1"
+        style={{ color: 'var(--color-text-secondary)', borderColor: 'var(--color-border)' }}
+      >
+        « {coachCue} »
       </div>
-    ) : (
-      <div style={{ height: 12 }} />
     )}
   </div>
 );
-
-const WorkoutDrawer: React.FC<WorkoutDrawerProps> = ({ event, onClose, onSaveRoute }) => {
-  const [isSaving, setIsSaving]   = useState(false);
-  const [isSaved,  setIsSaved]    = useState(false);
-
-  // reset saved state gdy event się zmienia
-  useEffect(() => { setIsSaved(false); }, [event?.id]);
-
-  const handleSaveRoute = async () => {
-    if (!event || !onSaveRoute) return;
-    setIsSaving(true);
-    await onSaveRoute(event.id, event.label);
-    setIsSaving(false);
-    setIsSaved(true);
-  };
-  const isRest = event?.is_rest_day ||
-    event?.type?.toLowerCase().includes('rest') ||
-    event?.type?.toLowerCase().includes('recovery') ||
-    event?.type?.toLowerCase().includes('wolne');
-
-  const style = event?.type ? getTypeStyle(event.type) : { color: '#94a3b8', bg: 'rgba(148,163,184,0.1)' };
-  const accentColor = event?.is_completed ? '#fc4c02' : style.color;
-
-  // Total distance (prefer sum of phases, fall back to top-level distance_km)
-  const totalDist = (() => {
-    const parts = [
-      event?.warmup_distance_km   ?? 0,
-      event?.main_distance_km     ?? 0,
-      event?.cooldown_distance_km ?? 0,
-    ];
-    const sum = parts.reduce((a, b) => a + b, 0);
-    return sum > 0 ? Math.round(sum * 100) / 100 : (event?.distance_km ?? null);
-  })();
-
-  // Check if we have v5 structured phases (either distance_km or coach cue present)
-  const hasPhases = !!(
-    event?.warmup_distance_km   || event?.warmup_beginner_explanation ||
-    event?.main_distance_km     || event?.main_beginner_explanation ||
-    event?.cooldown_distance_km || event?.cooldown_beginner_explanation
-  );
-
-  if (!event) return null;
-
-  return (
-    <>
-      {/* Backdrop */}
-      <div
-        onClick={onClose}
-        style={{
-          position: 'fixed', inset: 0, zIndex: 10050,
-          background: 'rgba(0,0,0,0.55)',
-          backdropFilter: 'blur(6px)',
-          WebkitBackdropFilter: 'blur(6px)',
-          animation: 'modalFadeIn 0.2s ease',
-        }}
-      />
-
-      {/* Drawer panel */}
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Szczegóły treningu"
-        style={{
-          position: 'fixed', top: 0, right: 0, bottom: 0,
-          width: '100%', maxWidth: 380, zIndex: 10051,
-          background: 'var(--color-surface)',
-          borderLeft: '1px solid var(--color-border)',
-          boxShadow: '-24px 0 80px rgba(0,0,0,0.4)',
-          display: 'flex', flexDirection: 'column',
-          overflowY: 'auto',
-          animation: 'drawerSlideIn 0.28s cubic-bezier(0.22,1,0.36,1)',
-        }}
-      >
-        {/* ── Header ─────────────────────────────────────────────── */}
-        <div style={{
-          padding: '20px 20px 16px',
-          borderBottom: '1px solid var(--color-border)',
-          background: `linear-gradient(135deg, ${accentColor}18, ${accentColor}06)`,
-          flexShrink: 0,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              {/* Badge + date */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                <span style={{
-                  fontSize: 10, fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase',
-                  padding: '3px 10px', borderRadius: 99,
-                  background: `${accentColor}20`, color: accentColor,
-                  border: `1px solid ${accentColor}40`,
-                }}>
-                  {event.is_completed ? '✓ STRAVA' : (event.type ?? 'TRENING')}
-                </span>
-                <span style={{ fontSize: 10, color: 'var(--color-text-muted)', fontWeight: 600 }}>
-                  {typeof event.date === 'string' ? event.date : String(event.date)}
-                </span>
-              </div>
-              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: 'var(--color-text-primary)', lineHeight: 1.2 }}>
-                {event.label}
-              </h2>
-            </div>
-            <button
-              onClick={onClose}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 6, borderRadius: 10, color: 'var(--color-text-muted)', display: 'flex', flexShrink: 0 }}
-              aria-label="Zamknij"
-            >
-              <X style={{ width: 20, height: 20 }} />
-            </button>
-          </div>
-
-          {/* ── Total distance stat chip ── */}
-          {totalDist && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
-              <MapPin style={{ width: 14, height: 14, color: accentColor, flexShrink: 0 }} />
-              <span style={{ fontSize: 30, fontWeight: 900, color: accentColor, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
-                {totalDist}
-              </span>
-              <span style={{ fontSize: 13, color: 'var(--color-text-muted)', fontWeight: 700 }}>km łącznie</span>
-            </div>
-          )}
-        </div>
-
-        {/* ── Body ────────────────────────────────────────────────── */}
-        <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
-
-          {isRest ? (
-            /* Rest day */
-            <div style={{
-              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-              padding: '40px 20px', gap: 12, textAlign: 'center',
-              background: 'rgba(148,163,184,0.06)', borderRadius: 16,
-              border: '1px dashed rgba(148,163,184,0.2)',
-            }}>
-              <Wind style={{ width: 36, height: 36, color: '#94a3b8' }} />
-              <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--color-text-secondary)' }}>Dzień regeneracji</p>
-              <p style={{ margin: 0, fontSize: 13, color: 'var(--color-text-muted)', maxWidth: 240 }}>
-                {event.trainer_notes || event.description || 'Odpoczynek jest częścią treningu. Pozwól mięśniom się zregenerować.'}
-              </p>
-            </div>
-          ) : hasPhases ? (
-            /* ── v4 Structured phases — beginner-friendly ── */
-            <>
-                          {/* ─── ROZGRZEWKA ────────────────────────────── */}
-              {(event.warmup_distance_km != null || event.warmup_beginner_explanation) && (
-                <PhaseRow
-                  icon={<Flame style={{ width: 13, height: 13, color: '#fb923c' }} />}
-                  label="Rozgrzewka"
-                  accentColor="#fb923c"
-                  distKm={event.warmup_distance_km}
-                  pace={event.warmup_exact_pace ?? undefined}
-                  hrTarget={event.warmup_heart_rate_target ?? undefined}
-                  coachCue={event.warmup_beginner_explanation ?? undefined}
-                />
-              )}
-
-              {/* ─── BIEG GŁÓWNY ─────────────────────────── */}
-              {(event.main_distance_km != null || event.main_beginner_explanation) && (
-                <PhaseRow
-                  icon={<Activity style={{ width: 13, height: 13, color: accentColor }} />}
-                  label="Bieg główny"
-                  accentColor={accentColor}
-                  distKm={event.main_distance_km}
-                  pace={event.main_exact_pace ?? event.main_target_pace ?? undefined}
-                  hrTarget={event.main_heart_rate_target ?? undefined}
-                  coachCue={event.main_beginner_explanation ?? undefined}
-                />
-              )}
-
-              {/* ─── SCHŁODZENIE ─────────────────────────── */}
-              {(event.cooldown_distance_km != null || event.cooldown_beginner_explanation) && (
-                <PhaseRow
-                  icon={<Wind style={{ width: 13, height: 13, color: '#60a5fa' }} />}
-                  label="Schłodzenie"
-                  accentColor="#60a5fa"
-                  distKm={event.cooldown_distance_km}
-                  pace={event.cooldown_exact_pace ?? undefined}
-                  hrTarget={event.cooldown_heart_rate_target ?? undefined}
-                  coachCue={event.cooldown_beginner_explanation ?? undefined}
-                />
-              )}
-
-              {/* Trainer notes — grey box at bottom */}
-              {event.trainer_notes && (
-                <div style={{
-                  marginTop: 6,
-                  borderRadius: 12,
-                  background: 'rgba(148,163,184,0.07)',
-                  border: '1px solid rgba(148,163,184,0.18)',
-                  padding: '10px 14px',
-                  display: 'flex', gap: 10, alignItems: 'flex-start',
-                }}>
-                  <BrainCircuit style={{ width: 14, height: 14, color: '#a78bfa', flexShrink: 0, marginTop: 2 }} />
-                  <p style={{ margin: 0, fontSize: 12, lineHeight: 1.6, color: 'var(--color-text-muted)' }}>
-                    {event.trainer_notes}
-                  </p>
-                </div>
-              )}
-            </>
-          ) : (
-            /* ── Legacy fallback: show raw description ── */
-            <>
-              {event.description && (
-                <div style={{
-                  borderRadius: 12,
-                  background: `${accentColor}09`,
-                  border: `1px solid ${accentColor}22`,
-                  padding: '12px 14px',
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                    <Activity style={{ width: 14, height: 14, color: accentColor }} />
-                    <span style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.07em', color: accentColor }}>
-                      Opis treningu
-                    </span>
-                  </div>
-                  <p style={{ margin: 0, fontSize: 13, lineHeight: 1.65, color: 'var(--color-text-secondary)' }}>
-                    {event.description}
-                  </p>
-                </div>
-              )}
-              {/* target_pace as a compact chip if available */}
-              {event.target_pace && (
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '10px 14px', borderRadius: 12,
-                  background: `${accentColor}0d`, border: `1px solid ${accentColor}25`,
-                }}>
-                  <Timer style={{ width: 14, height: 14, color: accentColor }} />
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Tempo</span>
-                  <strong style={{ fontSize: 15, fontWeight: 900, color: accentColor, marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>
-                    {event.target_pace}
-                  </strong>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-
-        {/* ── Footer: Zapisz trasę (tylko Strava) ───────────────── */}
-        {event?.is_completed && onSaveRoute && (
-          <div style={{
-            borderTop: '1px solid var(--color-border)',
-            padding: '12px 16px',
-            flexShrink: 0,
-          }}>
-            <button
-              id="btn-save-strava-route"
-              disabled={isSaving || isSaved}
-              onClick={handleSaveRoute}
-              style={{
-                width: '100%',
-                padding: '10px 16px',
-                borderRadius: 12,
-                border: isSaved
-                  ? '1px solid rgba(52,211,153,0.3)'
-                  : '1px solid rgba(99,102,241,0.3)',
-                background: isSaved
-                  ? 'rgba(52,211,153,0.1)'
-                  : 'rgba(99,102,241,0.1)',
-                color: isSaved ? '#34d399' : 'var(--color-accent)',
-                fontSize: 13,
-                fontWeight: 700,
-                cursor: (isSaving || isSaved) ? 'not-allowed' : 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                transition: 'all 0.2s',
-                opacity: isSaving ? 0.7 : 1,
-              }}
-            >
-              {isSaving ? (
-                <><Loader2 style={{ width: 14, height: 14, animation: 'spin 1s linear infinite' }} /> Zapisuję…</>
-              ) : isSaved ? (
-                <><CheckCircle style={{ width: 14, height: 14 }} /> Trasa zapisana w bibliotece!</>
-              ) : (
-                <><Route style={{ width: 14, height: 14 }} /> Zapisz trasę do biblioteki</>
-              )}
-            </button>
-          </div>
-        )}
-
-      </div>
-    </>
-  );
-};
 
 // ── Kasia Generate Overlay — wieloetapowy, phase-aware ──────────────────────
 
 const PHASES = [
   {
     id:      'analyzing'  as const,
-    icon:    '📊',
+    icon:    null,
     label:   'Analizuję Twoje dane ze Strava…',
     sub:     'Pobieram historię 30 dni i obliczam Twoje tempa',
   },
   {
     id:      'computing'  as const,
-    icon:    '🧠',
+    icon:    null,
     label:   'Kasia przelicza tempa i układa pełny plan…',
     sub:     'Gemini generuje ustrukturyzowany JSON dla każdego dnia',
   },
   {
     id:      'saving'     as const,
-    icon:    '💾',
+    icon:    null,
     label:   'Zapisuję plan do kalendarza…',
     sub:     'Walidacja Pydantic + atomowy zapis do bazy danych',
   },
@@ -523,118 +304,107 @@ type Phase = typeof PHASES[number]['id'];
 const KasiaGenerateOverlay: React.FC<{ phase: Phase | null; elapsed: number }> = ({ phase, elapsed }) => {
   const currentIdx = PHASES.findIndex(p => p.id === phase);
   const current    = currentIdx >= 0 ? PHASES[currentIdx] : PHASES[0];
+  const accentColor = '#CEFF00'; // Neonowy zielony niezależnie od motywu dla ciemnego overlay
 
   return (
     <div
       role="status"
       aria-live="polite"
       aria-label="Kasia generuje plan treningowy"
-      style={{
-        position:        'fixed',
-        inset:           0,
-        zIndex:          9999,
-        display:         'flex',
-        flexDirection:   'column',
-        alignItems:      'center',
-        justifyContent:  'center',
-        gap:             28,
-        background:      'rgba(8, 8, 18, 0.88)',
-        backdropFilter:  'blur(16px)',
-        WebkitBackdropFilter: 'blur(16px)',
-        animation:       'modalFadeIn 0.25s ease',
-      }}
+      className="fixed inset-0 z-[9999] flex flex-col items-center justify-center gap-7 bg-black/95 backdrop-blur-md animate-in fade-in"
     >
       {/* ── Animated brain rings ── */}
-      <div style={{ position: 'relative', width: 96, height: 96, flexShrink: 0 }}>
+      <div className="relative w-24 h-24 shrink-0">
         {/* outer ring */}
-        <div style={{
-          position: 'absolute', inset: 0,
-          borderRadius: '50%',
-          border: '3px solid transparent',
-          borderTopColor: '#6366f1',
-          borderRightColor: '#6366f1',
-          animation: 'spin 0.85s linear infinite',
-        }} />
+        <div 
+          className="absolute inset-0 rounded-full border-4 border-transparent animate-[spin_0.85s_linear_infinite]" 
+          style={{ borderTopColor: accentColor, borderRightColor: accentColor }}
+        />
         {/* middle ring */}
-        <div style={{
-          position: 'absolute', inset: 10,
-          borderRadius: '50%',
-          border: '2.5px solid transparent',
-          borderTopColor: '#a78bfa',
-          borderLeftColor: '#a78bfa',
-          animation: 'spin 1.3s linear infinite reverse',
-        }} />
+        <div 
+          className="absolute inset-2.5 rounded-full border-[3px] border-transparent animate-[spin_1.3s_linear_infinite_reverse]" 
+          style={{ borderTopColor: `${accentColor}99`, borderLeftColor: `${accentColor}99` }}
+        />
         {/* inner ring */}
-        <div style={{
-          position: 'absolute', inset: 22,
-          borderRadius: '50%',
-          border: '2px solid transparent',
-          borderTopColor: '#818cf8',
-          animation: 'spin 2s linear infinite',
-        }} />
+        <div 
+          className="absolute inset-[22px] rounded-full border-2 border-transparent animate-[spin_2s_linear_infinite]" 
+          style={{ borderTopColor: `${accentColor}66` }}
+        />
         {/* icon center */}
-        <div style={{
-          position: 'absolute', inset: 32,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <BrainCircuit style={{ width: 22, height: 22, color: '#a5b4fc' }} />
+        <div className="absolute inset-8 flex items-center justify-center">
+          <BrainCircuit className="w-6 h-6" style={{ color: accentColor }} />
         </div>
       </div>
 
       {/* ── Text area ── */}
-      <div style={{ textAlign: 'center', maxWidth: 340, padding: '0 24px' }}>
-        <p style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#e2e8f0', lineHeight: 1.3 }}>
+      <div className="text-center max-w-[340px] px-6">
+        <p className="m-0 text-lg font-display font-black text-white leading-tight">
           {current.icon} {current.label}
         </p>
-        <p style={{ margin: '8px 0 0', fontSize: 12, color: '#64748b', lineHeight: 1.5 }}>
+        <p className="mt-2 text-sm text-zinc-400 leading-relaxed">
           {current.sub}
         </p>
       </div>
 
       {/* ── Step indicators ── */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: 300 }}>
+      <div className="flex flex-col gap-2 w-[300px]">
         {PHASES.map((p, i) => {
           const done    = i < currentIdx;
           const active  = i === currentIdx;
           const pending = i > currentIdx;
+          
+          let cardStyle: React.CSSProperties = {
+            backgroundColor: 'rgba(255,255,255,0.03)',
+            borderColor: 'rgba(255,255,255,0.08)',
+          };
+          if (active) {
+            cardStyle = {
+              backgroundColor: `${accentColor}15`,
+              borderColor: `${accentColor}40`,
+            };
+          } else if (done) {
+            cardStyle = {
+              backgroundColor: 'rgba(52,211,153,0.1)',
+              borderColor: 'rgba(52,211,153,0.3)',
+            };
+          }
+
+          let dotStyle: React.CSSProperties = {
+            backgroundColor: 'rgba(255,255,255,0.1)',
+            color: '#a1a1aa',
+          };
+          if (active) {
+            dotStyle = {
+              backgroundColor: accentColor,
+              color: '#0a0a0c',
+              boxShadow: `0 0 10px ${accentColor}99`,
+            };
+          } else if (done) {
+            dotStyle = {
+              backgroundColor: '#34d399',
+              color: '#ffffff',
+            };
+          }
+
           return (
             <div
               key={p.id}
-              style={{
-                display:        'flex',
-                alignItems:     'center',
-                gap:            10,
-                padding:        '8px 14px',
-                borderRadius:   10,
-                background:     active  ? 'rgba(99,102,241,0.15)'
-                              : done    ? 'rgba(52,211,153,0.08)'
-                              : 'rgba(255,255,255,0.03)',
-                border:         `1px solid ${
-                                  active  ? 'rgba(99,102,241,0.4)'
-                                : done    ? 'rgba(52,211,153,0.25)'
-                                : 'rgba(255,255,255,0.06)'}`,
-                transition:     'all 0.3s ease',
-                opacity:        pending ? 0.45 : 1,
-              }}
+              className={`flex items-center gap-3 py-2 px-3.5 rounded-[2px] transition-all duration-300 border ${pending ? 'opacity-40' : 'opacity-100'}`}
+              style={cardStyle}
             >
               {/* status dot */}
-              <div style={{
-                width:         18, height: 18, borderRadius: '50%', flexShrink: 0,
-                display:       'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize:      10, fontWeight: 800,
-                background:    active  ? '#6366f1'
-                             : done    ? '#34d399'
-                             : 'rgba(255,255,255,0.08)',
-                color:         active || done ? '#fff' : '#475569',
-                boxShadow:     active ? '0 0 10px rgba(99,102,241,0.6)' : 'none',
-                animation:     active ? 'pulse 1.5s ease infinite' : 'none',
-              }}>
+              <div 
+                className={`w-4 h-4 rounded-full shrink-0 flex items-center justify-center text-[9px] font-black ${active ? 'animate-pulse' : ''}`}
+                style={dotStyle}
+              >
                 {done ? '✓' : i + 1}
               </div>
-              <span style={{
-                fontSize: 12, fontWeight: active ? 700 : 500,
-                color: active ? '#c7d2fe' : done ? '#6ee7b7' : '#475569',
-              }}>
+              <span 
+                className="text-xs font-semibold"
+                style={{
+                  color: active ? accentColor : done ? '#34d399' : '#a1a1aa'
+                }}
+              >
                 {p.label.replace('…', '')}
               </span>
             </div>
@@ -643,33 +413,19 @@ const KasiaGenerateOverlay: React.FC<{ phase: Phase | null; elapsed: number }> =
       </div>
 
       {/* ── Progress bar + elapsed ── */}
-      <div style={{ width: 300 }}>
-        <div style={{
-          height: 3, borderRadius: 99,
-          background: 'rgba(255,255,255,0.06)',
-          overflow: 'hidden',
-        }}>
-          <div style={{
-            height: '100%',
-            borderRadius: 99,
-            background: 'linear-gradient(90deg, #6366f1, #a78bfa)',
-            width: `${Math.min(100, ((currentIdx + 1) / PHASES.length) * 100)}%`,
-            transition: 'width 0.8s cubic-bezier(0.4, 0, 0.2, 1)',
-          }} />
+      <div className="w-[300px]">
+        <div className="h-1 rounded-full bg-white/10 overflow-hidden">
+          <div 
+            className="h-full rounded-full transition-all duration-1000 ease-in-out"
+            style={{ 
+              width: `${Math.min(100, ((currentIdx + 1) / PHASES.length) * 100)}%`,
+              backgroundColor: accentColor
+            }} 
+          />
         </div>
-        <div style={{
-          display: 'flex', justifyContent: 'space-between',
-          marginTop: 8,
-        }}>
-          <span style={{ fontSize: 10, color: '#475569', fontWeight: 600 }}>
-            NIE ODŚWIEŻAJ STRONY
-          </span>
-          <span style={{
-            fontSize: 10, color: '#6366f1', fontWeight: 700,
-            fontVariantNumeric: 'tabular-nums',
-          }}>
-            {elapsed}s
-          </span>
+        <div className="flex justify-between mt-2">
+          <span className="label-mono text-zinc-500 text-[9px] tracking-widest font-mono-custom">NIE ODŚWIEŻAJ STRONY</span>
+          <span className="label-mono text-[10px] font-mono-custom font-black" style={{ color: accentColor }}>{elapsed}s</span>
         </div>
       </div>
     </div>
@@ -735,6 +491,36 @@ const PlanConfigModal: React.FC<PlanConfigModalProps> = ({ onClose, onConfirm, i
       return next;
     });
 
+  // Helper do automatycznego formatowania MM:SS (dodawanie dwukropka po 2 cyfrach)
+  const handleMmssChange = (val: string, prev: string, setter: (v: string) => void, clearError: () => void) => {
+    clearError();
+    let clean = val.replace(/[^0-9:]/g, '');
+    
+    // Jeśli rośnie (użytkownik dopisuje znaki)
+    if (clean.length > prev.length) {
+      const digits = clean.replace(/[^0-9]/g, '');
+      if (digits.length === 2 && !clean.includes(':')) {
+        clean = digits + ':';
+      } else if (digits.length === 3 && !clean.includes(':')) {
+        clean = digits.slice(0, 2) + ':' + digits.slice(2);
+      } else if (digits.length === 4) {
+        clean = digits.slice(0, 2) + ':' + digits.slice(2);
+      } else if (digits.length >= 5) {
+        clean = digits.slice(0, digits.length - 2) + ':' + digits.slice(digits.length - 2);
+      }
+    }
+    setter(clean);
+  };
+
+  // Gramatyczne etykiety dla tygodni w języku polskim
+  const getWeeksLabel = (w: number) => {
+    if (w === 1) return '1 tydzień';
+    if (w === 2) return '2 tygodnie';
+    if (w === 4) return '4 tygodnie';
+    if (w === 8) return '8 tygodni';
+    return `${w} tyg.`;
+  };
+
   // ── Step 1 → Step 2 ────────────────────────────────────────────────────────
   const handleNext = (e: React.FormEvent) => {
     e.preventDefault();
@@ -769,25 +555,6 @@ const PlanConfigModal: React.FC<PlanConfigModalProps> = ({ onClose, onConfirm, i
     });
   };
 
-  // ── Shared styles ───────────────────────────────────────────────────────────
-  const labelStyle: React.CSSProperties = {
-    fontSize: 11, fontWeight: 700,
-    color: 'var(--color-text-secondary)',
-    textTransform: 'uppercase', letterSpacing: '0.07em',
-    marginBottom: 2,
-  };
-  const inputStyle = (hasErr: boolean): React.CSSProperties => ({
-    fontSize: 13,
-    borderColor:  hasErr ? '#f87171' : undefined,
-    boxShadow:    hasErr ? '0 0 0 2px rgba(248,113,113,0.25)' : undefined,
-  });
-  const errorStyle: React.CSSProperties = {
-    margin: '3px 0 0', fontSize: 11, color: '#f87171',
-  };
-  const hintStyle: React.CSSProperties = {
-    margin: '3px 0 0', fontSize: 11, color: 'var(--color-text-muted)',
-  };
-
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div
@@ -795,168 +562,121 @@ const PlanConfigModal: React.FC<PlanConfigModalProps> = ({ onClose, onConfirm, i
       aria-modal="true"
       aria-labelledby="plan-modal-title"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 10001,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: 'rgba(0,0,0,0.65)',
-        backdropFilter: 'blur(10px)',
-        WebkitBackdropFilter: 'blur(10px)',
-        padding: '16px',
-        animation: 'modalFadeIn 0.2s ease',
-      }}
+      className="fixed inset-0 z-[10001] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-in fade-in"
     >
       <form
         onSubmit={step === 1 ? handleNext : handleSubmit}
-        style={{
-          width: '100%', maxWidth: 400,
-          borderRadius: 20,
-          background: 'var(--color-surface)',
-          border: '1px solid var(--color-border)',
-          boxShadow: '0 32px 80px rgba(0,0,0,0.5)',
-          overflow: 'hidden',
-          display: 'flex', flexDirection: 'column',
-          animation: 'modalSlideUp 0.25s cubic-bezier(0.34,1.56,0.64,1)',
-        }}
+        className="w-full max-w-[400px] card-sporty shadow-[0_32px_80px_rgba(0,0,0,0.5)] flex flex-col animate-in slide-in-from-bottom-8"
       >
 
         {/* ── Header ─────────────────────────────────────────────────────── */}
-        <div style={{
-          padding: '18px 20px 14px',
-          borderBottom: '1px solid var(--color-border)',
-          background: 'linear-gradient(135deg, rgba(99,102,241,0.12), rgba(124,58,237,0.08))',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{
-                width: 34, height: 34, borderRadius: 10, flexShrink: 0,
-                background: 'linear-gradient(135deg, #4f46e5, #7c3aed)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                boxShadow: '0 4px 12px rgba(99,102,241,0.4)',
-              }}>
-                <BrainCircuit style={{ width: 18, height: 18, color: '#fff' }} />
+        <div className="p-4 pb-3 border-b border-border bg-surface-elevated">
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-[var(--radius)] bg-accent/10 flex items-center justify-center border border-accent/20 shrink-0">
+                <BrainCircuit className="w-4 h-4 text-accent" />
               </div>
               <div>
-                <p id="plan-modal-title" style={{ margin: 0, fontSize: 14, fontWeight: 800, color: 'var(--color-text-primary)' }}>
-                  Skonfiguruj swój plan
+                <p id="plan-modal-title" className="m-0 text-sm font-display font-black text-primary uppercase tracking-tight">
+                  Skonfiguruj plan
                 </p>
-                <p style={{ margin: 0, fontSize: 11, color: 'var(--color-text-muted)' }}>
+                <p className="m-0 text-[11px] font-medium text-muted">
                   {STEP_LABELS[step - 1]}
                 </p>
               </div>
             </div>
             <button
               type="button" onClick={onClose}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, borderRadius: 8, color: 'var(--color-text-muted)', display: 'flex' }}
+              className="btn-ghost p-1 rounded-[var(--radius)]"
               aria-label="Zamknij"
             >
-              <X style={{ width: 18, height: 18 }} />
+              <X className="w-4 h-4" />
             </button>
           </div>
 
           {/* Progress bar */}
-          <div style={{ marginTop: 14, display: 'flex', gap: 6 }}>
+          <div className="mt-3 flex gap-1">
             {([1, 2] as const).map(s => (
-              <div key={s} style={{
-                flex: 1, height: 3, borderRadius: 99,
-                background: s <= step
-                  ? 'linear-gradient(90deg, #4f46e5, #7c3aed)'
-                  : 'var(--color-border)',
-                transition: 'background 0.3s ease',
-              }} />
+              <div key={s} className={`flex-1 h-0.5 rounded-[1px] transition-colors duration-300 ${s <= step ? 'bg-accent' : 'bg-border'}`} />
             ))}
           </div>
-          <p style={{ margin: '6px 0 0', fontSize: 10, color: 'var(--color-text-muted)' }}>
-            Krok {step} z 2
-          </p>
+          <p className="label-mono mt-1.5 text-[9px]">Krok {step} z 2</p>
         </div>
 
         {/* ── Body ───────────────────────────────────────────────────────── */}
-        <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: 18, overflowY: 'auto', maxHeight: '60vh' }}>
+        <div className="p-4 flex flex-col gap-4 overflow-y-auto max-h-[55vh] bg-surface">
 
           {/* ════════════════ STEP 1 — Runner profile ════════════════════ */}
           {step === 1 && (
             <>
               {/* 5k PB — mandatory */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <label htmlFor="input-pb5k" style={labelStyle}>
-                    ⚡ Aktualny rekord na 5 km
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center justify-between">
+                  <label htmlFor="input-pb5k" className="label-mono text-secondary">
+                    Aktualny rekord na 5 km
                   </label>
-                  <span style={{
-                    fontSize: 10, color: '#f87171', background: 'rgba(248,113,113,0.1)',
-                    padding: '2px 8px', borderRadius: 20, fontWeight: 700,
-                  }}>wymagane</span>
+                  <span className="badge badge-lime text-danger bg-danger/10 border-danger/30 text-[9px] px-1.5 py-0.5">wymagane</span>
                 </div>
                 <input
                   id="input-pb5k"
                   type="text"
                   value={pb5k}
-                  onChange={e => { setPb5k(e.target.value); setPb5kError(null); }}
+                  onChange={e => handleMmssChange(e.target.value, pb5k, setPb5k, () => setPb5kError(null))}
                   onBlur={e  => setPb5kError(validateMmss(e.target.value, false))}
-                  placeholder="MM:SS — np. 24:30"
-                  className="input-base"
+                  placeholder="np. 24:30"
+                  className={`input-base font-mono-custom p-2 text-sm ${pb5kError ? 'border-danger focus:border-danger focus:ring-1 focus:ring-danger' : ''}`}
                   aria-required="true"
                   aria-describedby={pb5kError ? 'pb5k-error' : 'pb5k-hint'}
-                  style={inputStyle(!!pb5kError)}
                 />
                 {pb5kError
-                  ? <p id="pb5k-error" style={errorStyle}>{pb5kError}</p>
-                  : <p id="pb5k-hint"  style={hintStyle}>
-                      Kasia wyliczy Twój VDOT i ustawi precyzyjne strefy tempa.
+                  ? <p id="pb5k-error" className="m-0 text-[10px] font-medium text-danger">{pb5kError}</p>
+                  : <p id="pb5k-hint"  className="m-0 text-[10px] text-muted">
+                      Kasia wyliczy Twój VDOT i ustawi strefy tempa.
                     </p>
                 }
               </div>
 
               {/* Target goal */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <label htmlFor="input-target-time" style={labelStyle}>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center justify-between">
+                  <label htmlFor="input-target-time" className="label-mono text-secondary">
                     🏆 Cel wynikowy
                   </label>
-                  <span style={{
-                    fontSize: 10, color: '#a78bfa', background: 'rgba(167,139,250,0.1)',
-                    padding: '2px 8px', borderRadius: 20, fontWeight: 600,
-                  }}>opcjonalne</span>
+                  <span className="badge badge-muted text-[9px] px-1.5 py-0.5">opcjonalne</span>
                 </div>
 
                 {/* Inline distance + time */}
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '0 0 110px' }}>
-                    <label htmlFor="input-target-dist" style={{ fontSize: 10, color: 'var(--color-text-muted)', fontWeight: 600 }}>
-                      Dystans (km)
-                    </label>
+                <div className="flex gap-2">
+                  <div className="flex flex-col gap-1 basis-[110px]">
+                    <label htmlFor="input-target-dist" className="text-[10px] font-semibold text-muted uppercase tracking-wider">Dystans</label>
                     <select
                       id="input-target-dist"
                       value={targetDist}
                       onChange={e => setTargetDist(e.target.value)}
-                      className="input-base"
-                      style={{ fontSize: 13, paddingRight: 8 }}
+                      className="input-base p-2 text-sm bg-surface-overlay"
                     >
                       {['5','10','15','21.1','42.2'].map(d => (
                         <option key={d} value={d}>{d} km</option>
                       ))}
                     </select>
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
-                    <label htmlFor="input-target-time" style={{ fontSize: 10, color: 'var(--color-text-muted)', fontWeight: 600 }}>
-                      Docelowy czas
-                    </label>
+                  <div className="flex flex-col gap-1 flex-1">
+                    <label htmlFor="input-target-time" className="text-[10px] font-semibold text-muted uppercase tracking-wider">Docelowy czas</label>
                     <input
                       id="input-target-time"
                       type="text"
                       value={targetTime}
-                      onChange={e => { setTargetTime(e.target.value); setTargetTimeErr(null); }}
+                      onChange={e => handleMmssChange(e.target.value, targetTime, setTargetTime, () => setTargetTimeErr(null))}
                       onBlur={e  => setTargetTimeErr(validateMmss(e.target.value, true))}
-                      placeholder="MM:SS — np. 50:00"
-                      className="input-base"
+                      placeholder="np. 50:00"
+                      className={`input-base font-mono-custom p-2 text-sm ${targetTimeErr ? 'border-danger focus:border-danger focus:ring-1 focus:ring-danger' : ''}`}
                       aria-describedby={targetTimeErr ? 'target-error' : undefined}
-                      style={inputStyle(!!targetTimeErr)}
                     />
                   </div>
                 </div>
-                {targetTimeErr && <p id="target-error" style={errorStyle}>{targetTimeErr}</p>}
-                <p style={hintStyle}>
-                  Np. &quot;50:00 na 10 km&quot; — Kasia zbuduje plan prowadzący do tego wyniku.
+                {targetTimeErr && <p id="target-error" className="m-0 text-[10px] font-medium text-danger">{targetTimeErr}</p>}
+                <p className="m-0 text-[10px] text-muted">
+                  Np. "50:00 na 10 km" — Kasia zbuduje plan pod ten cel.
                 </p>
               </div>
             </>
@@ -966,51 +686,47 @@ const PlanConfigModal: React.FC<PlanConfigModalProps> = ({ onClose, onConfirm, i
           {step === 2 && (
             <>
               {/* Liczba dni */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <label style={labelStyle}>🏃 Dni treningowe / tydzień</label>
-                  <span style={{
-                    fontSize: 13, fontWeight: 800, color: 'var(--color-accent)',
-                    background: 'var(--color-accent-subtle)', padding: '2px 10px', borderRadius: 20,
-                  }}>{trainingDays} dni</span>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center justify-between">
+                  <label className="label-mono text-secondary">Dni treningowe / tydzień</label>
+                  <span className="badge badge-lime text-[10px] px-1.5 py-0.5">{trainingDays} dni</span>
                 </div>
                 <input
                   type="range" min={2} max={6} step={1}
                   value={trainingDays}
                   onChange={e => setTrainingDays(Number(e.target.value))}
-                  style={{ width: '100%', accentColor: '#6366f1', cursor: 'pointer' }}
+                  className="w-full cursor-pointer my-1"
+                  style={{ accentColor: 'var(--color-accent)' }}
                 />
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--color-text-muted)', marginTop: -4 }}>
+                <div className="flex justify-between text-[9px] text-muted font-mono-custom px-1">
                   {[2,3,4,5,6].map(n => <span key={n}>{n}</span>)}
                 </div>
               </div>
 
               {/* Długość planu */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <label style={labelStyle}>📅 Długość planu</label>
-                <div style={{ display: 'flex', gap: 6 }}>
+              <div className="flex flex-col gap-1">
+                <label className="label-mono text-secondary">Długość planu</label>
+                <div className="flex gap-1.5">
                   {[1,2,4,8].map(w => (
                     <button
                       key={w} type="button"
                       onClick={() => setWeeks(w)}
-                      style={{
-                        flex: 1, padding: '7px 0', borderRadius: 10, border: '1px solid',
-                        fontSize: 12, fontWeight: 700, cursor: 'pointer', transition: 'all 0.15s',
-                        background:   weeks === w ? 'var(--color-accent)' : 'var(--color-surface-overlay)',
-                        borderColor:  weeks === w ? 'var(--color-accent)' : 'var(--color-border)',
-                        color:        weeks === w ? '#fff' : 'var(--color-text-secondary)',
-                      }}
+                      className={`flex-1 py-1.5 rounded-[var(--radius)] text-xs font-bold border transition-all duration-150 cursor-pointer ${
+                        weeks === w 
+                          ? 'bg-accent border-accent text-accent-fg shadow-sm' 
+                          : 'bg-surface-overlay border-border text-secondary hover:border-accent/50'
+                      }`}
                     >
-                      {w} tydz.
+                      {getWeeksLabel(w)}
                     </button>
                   ))}
                 </div>
               </div>
 
               {/* Dni wolne */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <label style={labelStyle}>🚫 Preferowane dni wolne</label>
-                <div style={{ display: 'flex', gap: 5 }}>
+              <div className="flex flex-col gap-1">
+                <label className="label-mono text-secondary">🚫 Preferowane dni wolne</label>
+                <div className="flex gap-1">
                   {DAYS_OF_WEEK.map(day => {
                     const active = restDays.has(day.id);
                     return (
@@ -1018,13 +734,9 @@ const PlanConfigModal: React.FC<PlanConfigModalProps> = ({ onClose, onConfirm, i
                         key={day.id} type="button"
                         onClick={() => toggleRestDay(day.id)}
                         aria-pressed={active}
-                        style={{
-                          flex: 1, padding: '7px 0', borderRadius: 10,
-                          border:      `1px solid ${active ? '#f87171' : 'var(--color-border)'}`,
-                          background:  active ? 'rgba(248,113,113,0.12)' : 'var(--color-surface-overlay)',
-                          color:       active ? '#f87171' : 'var(--color-text-muted)',
-                          fontSize: 10, fontWeight: 700, cursor: 'pointer', transition: 'all 0.15s',
-                        }}
+                        className={`flex-1 py-1.5 rounded-[var(--radius)] text-[10px] font-bold border transition-colors cursor-pointer ${
+                          active ? 'bg-danger/10 border-danger/40 text-danger' : 'bg-surface-overlay border-border text-muted hover:border-border-strong'
+                        }`}
                       >{day.label}</button>
                     );
                   })}
@@ -1032,20 +744,14 @@ const PlanConfigModal: React.FC<PlanConfigModalProps> = ({ onClose, onConfirm, i
               </div>
 
               {/* Summary card */}
-              <div style={{
-                padding: '12px 14px',
-                borderRadius: 12,
-                background: 'linear-gradient(135deg, rgba(99,102,241,0.08), rgba(124,58,237,0.05))',
-                border: '1px solid rgba(99,102,241,0.2)',
-                display: 'flex', flexDirection: 'column', gap: 4,
-              }}>
-                <p style={{ margin: 0, fontSize: 11, fontWeight: 700, color: '#a78bfa' }}>
-                  📋 Podsumowanie Twojego profilu
+              <div className="p-3 rounded-[var(--radius)] bg-black/10 border border-border flex flex-col gap-1 mt-1">
+                <p className="m-0 text-[10px] font-bold text-accent uppercase tracking-wider">
+                  📋 Podsumowanie
                 </p>
-                <p style={{ margin: 0, fontSize: 12, color: 'var(--color-text-secondary)' }}>
-                  5k PB: <strong style={{ color: 'var(--color-text-primary)' }}>{pb5k}</strong>
+                <p className="m-0 text-xs text-secondary font-medium">
+                  5k PB: <strong className="text-primary font-mono-custom">{pb5k || '—'}</strong>
                   {targetTime && (
-                    <> &nbsp;·&nbsp; Cel: <strong style={{ color: 'var(--color-text-primary)' }}>{targetTime} na {targetDist} km</strong></>
+                    <> &nbsp;·&nbsp; Cel: <strong className="text-primary font-mono-custom">{targetTime} na {targetDist} km</strong></>
                   )}
                 </p>
               </div>
@@ -1055,23 +761,12 @@ const PlanConfigModal: React.FC<PlanConfigModalProps> = ({ onClose, onConfirm, i
         </div>
 
         {/* ── Footer ─────────────────────────────────────────────────────── */}
-        <div style={{
-          padding: '14px 20px',
-          borderTop: '1px solid var(--color-border)',
-          display: 'flex', gap: 10,
-          background: 'var(--color-surface-elevated)',
-        }}>
+        <div className="p-3 border-t border-border flex gap-3 bg-surface-elevated">
           {/* Back / Cancel */}
           <button
             type="button"
             onClick={() => step === 1 ? onClose() : setStep(1)}
-            style={{
-              flex: 1, padding: '10px', borderRadius: 12,
-              border: '1px solid var(--color-border)',
-              background: 'transparent', color: 'var(--color-text-secondary)',
-              fontSize: 13, fontWeight: 600, cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-            }}
+            className="flex-1 btn-ghost py-2 text-xs uppercase tracking-wider font-bold rounded-[var(--radius)] cursor-pointer"
           >
             {step === 1 ? 'Anuluj' : '← Wróć'}
           </button>
@@ -1080,24 +775,14 @@ const PlanConfigModal: React.FC<PlanConfigModalProps> = ({ onClose, onConfirm, i
           <button
             type="submit"
             disabled={isLoading && step === 2}
-            style={{
-              flex: 2, padding: '10px', borderRadius: 12, border: 'none',
-              background: (isLoading && step === 2)
-                ? 'rgba(99,102,241,0.4)'
-                : 'linear-gradient(135deg, #4f46e5, #7c3aed)',
-              color: '#fff', fontSize: 13, fontWeight: 700,
-              cursor: (isLoading && step === 2) ? 'not-allowed' : 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-              boxShadow: (isLoading && step === 2) ? 'none' : '0 4px 16px rgba(99,102,241,0.45)',
-              transition: 'all 0.2s',
-            }}
+            className="flex-[2] btn-lime py-2 text-xs uppercase tracking-wider font-bold rounded-[var(--radius)] cursor-pointer"
           >
             {step === 1 ? (
               <>Dalej →</>
             ) : isLoading ? (
-              <><Loader2 style={{ width: 15, height: 15, animation: 'spin 1s linear infinite' }} /> Kasia myśli…</>
+              <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Kasia myśli…</>
             ) : (
-              <><Sparkles style={{ width: 15, height: 15 }} /> Generuj Plan</>
+              <><Sparkles className="w-3.5 h-3.5" /> Generuj Plan</>
             )}
           </button>
         </div>
@@ -1107,7 +792,11 @@ const PlanConfigModal: React.FC<PlanConfigModalProps> = ({ onClose, onConfirm, i
   );
 };
 // ── Main component ─────────────────────────────────────────────────────────
-export const PlannerPanel: React.FC = () => {
+interface PlannerPanelProps {
+  onRequestAnalysis?: (activityId: number, activityName: string) => void;
+}
+
+export const PlannerPanel: React.FC<PlannerPanelProps> = ({ onRequestAnalysis }) => {
   const { user, isLoggedIn } = useAuth();
 
   const [goals, setGoals]             = useState<Goal[]>([]);
@@ -1118,20 +807,21 @@ export const PlannerPanel: React.FC = () => {
 
   // ── Plan Config Modal state
   const [showPlanModal, setShowPlanModal] = useState(false);
-  const [selectedWorkout, setSelectedWorkout] = useState<CalendarEvent | null>(null);
 
   // ── Toast state (success / error feedback)
   const [toast, setToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showToast = useCallback((type: 'success' | 'error', text: string) => {
-    setToast({ type, text });
+    // Automatyczne usuwanie emoji z początku tekstu powiadomień
+    const cleanText = text.replace(/^(✅|❌|🗑️)\s*/, '');
+    setToast({ type, text: cleanText });
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 6000);
   }, []);
 
   // ── Calendar state
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
   const [calendarView, setCalendarView] = useState<'goals' | 'calendar'>('calendar');
 
   // Calendar aggregated data
@@ -1210,7 +900,6 @@ export const PlannerPanel: React.FC = () => {
 
   // ── Build unified calendar events map ────────────────────────────────────
   const allEvents = calendarData?.events ?? [];
-  const stravaCount = calendarData?.strava_count ?? 0;
   const planCount   = calendarData?.plan_count   ?? 0;
 
   const eventsByDate = (Array.isArray(allEvents) ? allEvents : []).reduce<Record<string, CalendarEvent[]>>((acc, ev) => {
@@ -1220,7 +909,9 @@ export const PlannerPanel: React.FC = () => {
   }, {});
 
   const selectedDateStr = toDateStr(selectedDate);
-  const selectedEvents  = selectedDateStr ? (eventsByDate[selectedDateStr] ?? []) : [];
+  const selectedEvents  = (selectedDateStr ? (eventsByDate[selectedDateStr] ?? []) : []).filter(
+    ev => !ev.is_rest_day && !ev.type?.toLowerCase().includes('rest')
+  );
 
   // ── Goal handlers ────────────────────────────────────────────────────────
   const handleCreateGoal = async (e: React.FormEvent) => {
@@ -1275,26 +966,6 @@ export const PlannerPanel: React.FC = () => {
     } catch { showToast('error', '❌ Błąd sieci.'); }
   }, [user, planCount, showToast, refetchCalendar]);
 
-  const handleSaveStravaRoute = useCallback(async (eventId: string, name: string) => {
-    if (!user) return;
-    const stravaId = parseInt(eventId.replace('strava-', ''), 10);
-    if (isNaN(stravaId)) {
-      showToast('error', 'Nie można zapisać trasy — brak ID aktywności Strava.');
-      return;
-    }
-    const res = await fetch(`${API}/api/routes/save-from-strava`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: user.user_id, strava_activity_id: stravaId, name }),
-    });
-    if (res.ok) {
-      showToast('success', `✅ Trasa „${name}” zapisana! Znajdziesz ją w zakładce Trasy.`);
-    } else {
-      const err = await res.json().catch(() => ({ detail: 'Nieznany błąd' }));
-      showToast('error', `❌ ${err.detail || 'Błąd zapisu trasy'}`);
-    }
-  }, [user, showToast]);
-
   const handleGeneratePlan = async (goalId: number) => {
     if (!user) return;
     setGenerating(goalId);
@@ -1314,62 +985,6 @@ export const PlannerPanel: React.FC = () => {
     finally { setGenerating(null); }
   };
 
-  // ── Calendar tile content — full-width event cards ──────────────────────
-  const tileContent = ({ date, view }: { date: Date; view: string }) => {
-    if (view !== 'month') return null;
-    const dateStr = toDateStr(date);
-    const events  = eventsByDate[dateStr];
-    if (!events || events.length === 0) return null;
-
-    return (
-      <div className="cal-blocks">
-        {events.slice(0, 2).map(ev => {
-          const isRest = ev.type?.toLowerCase().includes('rest') ||
-                         ev.type?.toLowerCase().includes('recovery') ||
-                         ev.type?.toLowerCase().includes('wolne');
-          if (isRest) {
-            return (
-              <div key={ev.id} className="cal-block cal-block--rest">
-                <span>WOLNE</span>
-              </div>
-            );
-          }
-          const style = ev.type ? getTypeStyle(ev.type) : { color: '#6366f1', bg: 'rgba(99,102,241,0.12)' };
-          const color = ev.is_completed ? '#fc4c02' : style.color;
-          const label = ev.distance_km
-            ? `${ev.distance_km} km`
-            : (ev.type ?? ev.label);
-          return (
-            <div
-              key={ev.id}
-              className="cal-block"
-              style={{
-                background: ev.is_completed ? 'rgba(252,76,2,0.15)' : style.bg,
-                color,
-                borderColor: `${color}50`,
-              }}
-              onClick={e => { e.stopPropagation(); setSelectedWorkout(ev); }}
-            >
-              <span className="cal-block-dot" style={{ background: color }} />
-              <span className="cal-block-text">{label}</span>
-            </div>
-          );
-        })}
-        {events.length > 2 && (
-          <div className="cal-block cal-block--more">+{events.length - 2}</div>
-        )}
-      </div>
-    );
-  };
-
-  const tileClassName = ({ date, view }: { date: Date; view: string }) => {
-    if (view !== 'month') return null;
-    const dateStr = toDateStr(date);
-    const classes: string[] = [];
-    if (eventsByDate[dateStr]?.some(e => e.is_completed))  classes.push('has-completed');
-    if (eventsByDate[dateStr]?.some(e => !e.is_completed)) classes.push('has-planned');
-    return classes.join(' ') || null;
-  };
 
   // ── Guard states ─────────────────────────────────────────────────────────
   if (!isLoggedIn) return (
@@ -1391,19 +1006,12 @@ export const PlannerPanel: React.FC = () => {
   const isGenerating = planStatus === 'loading';
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4 flex-1 overflow-hidden">
 
       {/* ── Fullscreen AI overlay ── */}
       {isGenerating && <KasiaGenerateOverlay phase={planPhase} elapsed={planElapsed} />}
 
-      {/* ── Workout Detail Drawer ── */}
-      {selectedWorkout && (
-        <WorkoutDrawer
-          event={selectedWorkout}
-          onClose={() => setSelectedWorkout(null)}
-          onSaveRoute={handleSaveStravaRoute}
-        />
-      )}
+      {/* WorkoutDrawer removed — workout details now expand inline in the day panel */}
 
       {/* ── Plan Config Modal ── */}
       {showPlanModal && (
@@ -1422,60 +1030,56 @@ export const PlannerPanel: React.FC = () => {
       {toast && (
         <div
           role="alert"
-          style={{
-            position: 'fixed',
-            bottom: 24,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            zIndex: 10000,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            padding: '12px 18px',
-            borderRadius: 14,
-            maxWidth: 420,
-            width: 'max-content',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.45)',
-            background: toast.type === 'success'
-              ? 'linear-gradient(135deg, rgba(16,185,129,0.95), rgba(5,150,105,0.95))'
-              : 'linear-gradient(135deg, rgba(239,68,68,0.95), rgba(185,28,28,0.95))',
-            backdropFilter: 'blur(8px)',
-            animation: 'slideUpFade 0.3s ease',
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[10000] flex items-center gap-3.5 py-3 px-4 rounded-[var(--radius)] w-max max-w-[440px] border shadow-[0_16px_48px_rgba(0,0,0,0.55)] bg-[var(--color-surface)] animate-in slide-in-from-bottom-8 border-l-4"
+          style={{ 
+            borderColor: 'var(--color-border)', 
+            borderLeftColor: toast.type === 'success' ? 'var(--color-success)' : 'var(--color-danger)'
           }}
         >
-          {toast.type === 'success'
-            ? <CheckCircle style={{ width: 18, height: 18, color: '#fff', flexShrink: 0 }} />
-            : <AlertCircle   style={{ width: 18, height: 18, color: '#fff', flexShrink: 0 }} />
-          }
-          <span style={{ color: '#fff', fontSize: 13, fontWeight: 600, lineHeight: 1.4 }}>
+          {/* Custom colored icon container */}
+          <div 
+            className="w-7 h-7 rounded-[var(--radius)] border flex items-center justify-center shrink-0"
+            style={{
+              backgroundColor: toast.type === 'success' ? 'rgba(52,211,153,0.10)' : 'rgba(239,68,68,0.10)',
+              borderColor: toast.type === 'success' ? 'rgba(52,211,153,0.20)' : 'rgba(239,68,68,0.20)',
+            }}
+          >
+            {toast.type === 'success' ? (
+              <CheckCircle className="w-4 h-4" style={{ color: 'var(--color-success)' }} />
+            ) : (
+              <AlertCircle className="w-4 h-4" style={{ color: 'var(--color-danger)' }} />
+            )}
+          </div>
+
+          {/* Sporty Display Typography Text */}
+          <span className="text-[11px] font-display font-black uppercase tracking-wider text-primary leading-tight flex-1">
             {toast.text}
           </span>
+
+          {/* Clean close button */}
           <button
             onClick={() => setToast(null)}
-            style={{ marginLeft: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.7)', padding: 2 }}
+            className="p-1 text-secondary hover:text-primary transition-colors bg-transparent border-none cursor-pointer flex items-center justify-center rounded-[var(--radius)]"
             aria-label="Zamknij"
           >
-            <X style={{ width: 14, height: 14 }} />
+            <X className="w-4 h-4" />
           </button>
         </div>
       )}
 
-      {/* ── View toggle ────────────────────────────────────────── */}
-      <div
-        className="flex p-1 rounded-xl gap-1"
-        style={{ background: 'var(--color-surface-overlay)', border: '1px solid var(--color-border)' }}
-      >
+      {/* ── View toggle (shadcn/ui style tabs with underline) ────────────────────── */}
+      <div className="flex border-b border-border/50 w-full shrink-0">
         {(['calendar', 'goals'] as const).map(v => (
           <button
             key={v}
             onClick={() => setCalendarView(v)}
-            className="flex-1 py-1.5 text-xs font-bold rounded-lg transition-all duration-150"
-            style={{
-              background: calendarView === v ? 'var(--color-accent)' : 'transparent',
-              color: calendarView === v ? '#fff' : 'var(--color-text-muted)',
-            }}
+            className={`flex-1 py-2.5 text-xs font-bold uppercase tracking-widest transition-all cursor-pointer border-b-2 bg-transparent ${
+              calendarView === v
+                ? 'border-primary text-primary font-black'
+                : 'border-transparent text-muted hover:text-secondary'
+            }`}
           >
-            {v === 'calendar' ? '📅 Kalendarz' : '🎯 Cele'}
+            {v === 'calendar' ? 'Kalendarz' : 'Cele'}
           </button>
         ))}
       </div>
@@ -1484,241 +1088,300 @@ export const PlannerPanel: React.FC = () => {
           VIEW: CALENDAR
       ════════════════════════════════════════════════════════════ */}
       {calendarView === 'calendar' && (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
 
-          {/* Legend */}
-          <div className="flex items-center gap-4 px-1">
-            <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full" style={{ background: '#fc4c02' }} />
-              <span className="text-[11px] font-medium" style={{ color: 'var(--color-text-muted)' }}>
-                Ukończony (Strava)
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full" style={{ background: '#6366f1' }} />
-              <span className="text-[11px] font-medium" style={{ color: 'var(--color-text-muted)' }}>
-                Zaplanowany (Kasia)
-              </span>
-            </div>
-          </div>
+          {/* Scrollable area: calendar + day details */}
+          <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-0 pb-2">
 
-          {/* ── CTA: Poproś Kasię o plan ─────────────────────────────────── */}
-          <button
-            id="btn-kasia-generate-plan"
-            disabled={isGenerating}
-            onClick={() => setShowPlanModal(true)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 10,
-              width: '100%',
-              padding: '13px 18px',
-              borderRadius: 14,
-              border: 'none',
-              cursor: isGenerating ? 'not-allowed' : 'pointer',
-              background: isGenerating
-                ? 'rgba(99,102,241,0.25)'
-                : 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 60%, #6366f1 100%)',
-              boxShadow: isGenerating ? 'none' : '0 4px 20px rgba(99,102,241,0.45)',
-              color: '#fff',
-              fontSize: 14,
-              fontWeight: 700,
-              letterSpacing: '0.01em',
-              transition: 'all 0.2s ease',
-              opacity: isGenerating ? 0.7 : 1,
-            }}
-            onMouseOver={e => {
-              if (!isGenerating) {
-                (e.currentTarget as HTMLElement).style.transform = 'translateY(-1px)';
-                (e.currentTarget as HTMLElement).style.boxShadow = '0 6px 28px rgba(99,102,241,0.6)';
-              }
-            }}
-            onMouseOut={e => {
-              (e.currentTarget as HTMLElement).style.transform = 'none';
-              (e.currentTarget as HTMLElement).style.boxShadow = isGenerating ? 'none' : '0 4px 20px rgba(99,102,241,0.45)';
-            }}
-          >
-            {isGenerating ? (
-              <>
-                <Loader2 style={{ width: 18, height: 18, animation: 'spin 1s linear infinite', flexShrink: 0 }} />
-                Kasia myśli…
-              </>
-            ) : (
-              <>
-                <BrainCircuit style={{ width: 18, height: 18, flexShrink: 0 }} />
-                Poproś Kasię o ułożenie planu
-                <Settings2 style={{ width: 14, height: 14, opacity: 0.7, flexShrink: 0 }} />
-              </>
-            )}
-          </button>
-
-          {/* ── Usuń plany — danger, widoczny tylko gdy istnieją plany ── */}
-          {planCount > 0 && (
-            <button
-              id="btn-delete-all-plans"
-              onClick={handleDeleteAllPlans}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-                width: '100%',
-                padding: '9px 16px',
-                borderRadius: 12,
-                border: '1px solid rgba(248,113,113,0.22)',
-                background: 'rgba(248,113,113,0.05)',
-                color: '#f87171',
-                fontSize: 12,
-                fontWeight: 700,
-                cursor: 'pointer',
-                transition: 'all 0.2s',
-              }}
-              onMouseOver={e => {
-                (e.currentTarget as HTMLElement).style.background = 'rgba(248,113,113,0.12)';
-                (e.currentTarget as HTMLElement).style.borderColor = 'rgba(248,113,113,0.4)';
-              }}
-              onMouseOut={e => {
-                (e.currentTarget as HTMLElement).style.background = 'rgba(248,113,113,0.05)';
-                (e.currentTarget as HTMLElement).style.borderColor = 'rgba(248,113,113,0.22)';
-              }}
-            >
-              <Trash2 style={{ width: 13, height: 13 }} />
-              Usuń wszystkie plany ({planCount})
-            </button>
-          )}
-
-          {/* React Calendar */}
-
-          <div className="planner-calendar-wrapper">
-            <Calendar
-              onChange={(v) => {
-                // react-calendar v6: Value = Date | [Date, Date] | null
-                // Guard against null (clicking already-selected tile) and range arrays
-                if (v && !Array.isArray(v)) setSelectedDate(v as Date);
-              }}
+            {/* Custom Calendar */}
+            <CustomCalendar
               value={selectedDate}
-              tileContent={tileContent}
-              tileClassName={tileClassName}
-              locale="pl-PL"
-              calendarType="iso8601"
+              onChange={(d) => setSelectedDate(d)}
+              eventsByDate={eventsByDate}
             />
-          </div>
 
-          {/* Selected date detail panel */}
-          <div
-            className="rounded-xl p-3"
-            style={{
-              background: 'var(--color-surface-elevated)',
-              border: '1px solid var(--color-border)',
-              minHeight: '64px',
-            }}
-          >
-            <p className="text-[11px] font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--color-text-muted)' }}>
-              {selectedDate instanceof Date && !isNaN(selectedDate.getTime())
-                ? selectedDate.toLocaleDateString('pl-PL', { weekday: 'long', day: 'numeric', month: 'long' })
-                : '—'}
-            </p>
+            {/* ── Day detail section ───────────────────────────────────── */}
+            {selectedDate && (
+              <div className="mt-3 flex flex-col gap-1.5 animate-in fade-in slide-in-from-top-1 duration-150">
 
-            {selectedEvents.length === 0 ? (
-              <p className="text-xs italic" style={{ color: 'var(--color-text-muted)', opacity: 0.6 }}>
-                Brak aktywności tego dnia
-              </p>
-            ) : (
-              <div className="flex flex-col gap-1.5">
-                {selectedEvents.map(ev => (
-                  <div
-                    key={String(ev.id)}
-                    className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg"
-                    style={{
-                      background: ev.is_completed
-                        ? 'rgba(252,76,2,0.08)'
-                        : (ev.type ? getTypeStyle(ev.type).bg : 'var(--color-accent-subtle)'),
-                      border: ev.is_completed
-                        ? '1px solid rgba(252,76,2,0.25)'
-                        : `1px solid ${ev.type ? getTypeStyle(ev.type).color + '40' : 'rgba(99,102,241,0.25)'}`,
-                    }}
+                {/* Date header */}
+                <div className="flex items-center justify-between px-0.5 mb-0.5">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted">
+                    {selectedDate instanceof Date && !isNaN(selectedDate.getTime())
+                      ? selectedDate.toLocaleDateString('pl-PL', { weekday: 'long', day: 'numeric', month: 'long' })
+                      : '—'}
+                  </span>
+                  <button
+                    onClick={() => setSelectedDate(null)}
+                    className="p-0.5 border-none bg-transparent text-muted hover:text-primary rounded-[2px] transition-colors cursor-pointer flex items-center justify-center"
+                    aria-label="Zamknij"
                   >
-                    {ev.is_completed ? (
-                      <CheckCircle className="w-3.5 h-3.5 shrink-0" style={{ color: '#fc4c02' }} />
-                    ) : (
-                      <Clock className="w-3.5 h-3.5 shrink-0" style={{ color: ev.type ? getTypeStyle(ev.type).color : '#6366f1' }} />
-                    )}
-                    <div className="flex-1 overflow-hidden">
-                      <p
-                        className="text-xs font-semibold truncate"
-                        style={{
-                          color: ev.is_completed
-                            ? '#fc4c02'
-                            : (ev.type ? getTypeStyle(ev.type).color : 'var(--color-accent)'),
-                        }}
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+
+                {selectedEvents.length === 0 ? (
+                  <p className="text-[11px] italic text-muted text-center py-3 px-2 rounded-[var(--radius)] border border-dashed border-border/40">
+                    Brak aktywności tego dnia
+                  </p>
+                ) : (
+                  selectedEvents.map(ev => {
+                    const evColor = ev.is_completed
+                      ? 'var(--color-strava)'
+                      : ev.type ? getTypeStyle(ev.type).color : 'var(--color-accent)';
+                    const evBg = ev.is_completed
+                      ? 'rgba(252,76,2,0.06)'
+                      : ev.type ? getTypeStyle(ev.type).bg : 'var(--color-accent-subtle)';
+                    const evBorder = ev.is_completed
+                      ? 'rgba(252,76,2,0.25)'
+                      : ev.type ? getTypeStyle(ev.type).color + '40' : 'rgba(180,242,78,0.25)';
+
+                    const parts = [ev.warmup_distance_km ?? 0, ev.main_distance_km ?? 0, ev.cooldown_distance_km ?? 0];
+                    const phaseSum = parts.reduce((a, b) => a + b, 0);
+                    const totalDist = phaseSum > 0 ? Math.round(phaseSum * 100) / 100 : (ev.distance_km ?? null);
+                    const hasPhases = !!(
+                      ev.warmup_distance_km || ev.warmup_beginner_explanation ||
+                      ev.main_distance_km   || ev.main_beginner_explanation   ||
+                      ev.cooldown_distance_km || ev.cooldown_beginner_explanation
+                    );
+                    const isRest = ev.is_rest_day || ev.type?.toLowerCase().includes('rest') || ev.type?.toLowerCase().includes('recovery');
+
+                    return (
+                      <div
+                        key={String(ev.id)}
+                        className="rounded-[var(--radius)] border overflow-hidden"
+                        style={{ background: evBg, borderColor: evBorder }}
                       >
-                        {ev.label}
-                      </p>
-                    </div>
-                    {ev.distance_km && (
-                      <span
-                        className="text-[10px] font-bold shrink-0 px-1.5 py-0.5 rounded-md"
-                        style={{
-                          background: ev.is_completed ? 'rgba(252,76,2,0.15)' : 'rgba(99,102,241,0.12)',
-                          color: ev.is_completed ? '#fc4c02' : 'var(--color-accent)',
-                        }}
-                      >
-                        {ev.distance_km} km
-                      </span>
-                    )}
-                    {ev.is_completed && (
-                      <span className="text-[9px] font-black uppercase tracking-wider shrink-0" style={{ color: '#fc4c02', opacity: 0.8 }}>
-                        STRAVA
-                      </span>
-                    )}
-                    {!ev.is_completed && (
-                      <button
-                        onClick={() => handleDeletePlan(ev.id)}
-                        className="shrink-0 w-4 h-4 flex items-center justify-center rounded transition-all"
-                        style={{ color: 'var(--color-text-muted)' }}
-                        onMouseOver={e => { (e.currentTarget as HTMLElement).style.color = '#f87171'; }}
-                        onMouseOut={e => { (e.currentTarget as HTMLElement).style.color = 'var(--color-text-muted)'; }}
-                        title="Usuń plan"
-                      >
-                        ×
-                      </button>
-                    )}
-                  </div>
-                ))}
+                        {/* Card header */}
+                        <div className="flex items-center gap-2 px-3 pt-2.5 pb-2">
+                          {ev.is_completed
+                            ? <CheckCircle className="w-3.5 h-3.5 shrink-0 text-strava" />
+                            : <Clock className="w-3.5 h-3.5 shrink-0" style={{ color: evColor }} />
+                          }
+                          <div className="flex-1 overflow-hidden">
+                            <p className="text-[14px] font-bold truncate m-0" style={{ color: evColor }}>
+                              {ev.label}
+                            </p>
+                          </div>
+                          {ev.is_completed && (
+                            <span className="text-[9px] font-black uppercase tracking-wider shrink-0 text-strava/70">STRAVA</span>
+                          )}
+                          {!ev.is_completed && (
+                            <button
+                              onClick={e => { e.stopPropagation(); handleDeletePlan(ev.id); }}
+                              className="shrink-0 w-5 h-5 flex items-center justify-center rounded-[2px] transition-colors text-muted hover:text-danger hover:bg-danger/10 border-none bg-transparent cursor-pointer ml-0.5"
+                              title="Usuń plan"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Details — always visible, no scroll needed */}
+                        <div className="border-t px-3 pb-3 pt-2 flex flex-col gap-2" style={{ borderColor: evBorder + '80', background: 'var(--color-surface-elevated)' }}>
+
+                          {/* Pace + dist summary */}
+                          {!ev.is_completed && (ev.main_exact_pace || ev.main_target_pace || ev.target_pace) && (
+                            <div className="flex items-center gap-2">
+                              <Timer className="w-3 h-3 shrink-0" style={{ color: evColor }} />
+                              <span className="text-[11px] font-black tabular-nums" style={{ color: evColor }}>
+                                {ev.main_exact_pace ?? ev.main_target_pace ?? ev.target_pace} min/km
+                              </span>
+                              {totalDist != null && (
+                                <>
+                                  <span className="text-muted text-[9px]">·</span>
+                                  <span className="text-[11px] font-bold text-muted tabular-nums">{totalDist} km łącznie</span>
+                                </>
+                              )}
+                            </div>
+                          )}
+
+                          {ev.is_completed && (totalDist != null || ev.avg_pace || ev.avg_heart_rate) && (
+                            <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${[totalDist, ev.avg_pace, ev.avg_heart_rate].filter(Boolean).length}, 1fr)` }}>
+                              {totalDist != null && (
+                                <div
+                                  className="flex flex-col items-center justify-center gap-0.5 rounded-lg py-2.5 px-1"
+                                  style={{ background: 'var(--color-surface-overlay)', border: '1px solid var(--color-border)' }}
+                                >
+                                  <span className="text-lg font-black tabular-nums leading-none" style={{ color: 'var(--color-strava)' }}>{totalDist}</span>
+                                  <span className="text-[9px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>km</span>
+                                </div>
+                              )}
+                              {ev.avg_pace && (
+                                <div
+                                  className="flex flex-col items-center justify-center gap-0.5 rounded-lg py-2.5 px-1"
+                                  style={{ background: 'var(--color-surface-overlay)', border: '1px solid var(--color-border)' }}
+                                >
+                                  <span className="text-lg font-black tabular-nums leading-none" style={{ color: 'var(--color-text-primary)' }}>{ev.avg_pace}</span>
+                                  <span className="text-[9px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>min/km</span>
+                                </div>
+                              )}
+                              {ev.avg_heart_rate && (
+                                <div
+                                  className="flex flex-col items-center justify-center gap-0.5 rounded-lg py-2.5 px-1"
+                                  style={{ background: 'var(--color-surface-overlay)', border: '1px solid var(--color-border)' }}
+                                >
+                                  <span className="text-lg font-black tabular-nums leading-none" style={{ color: '#f87171' }}>{ev.avg_heart_rate}</span>
+                                  <span className="text-[9px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>bpm</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {isRest ? (
+                            <div className="flex items-start gap-2">
+                              <Wind className="w-3.5 h-3.5 text-muted shrink-0 mt-0.5" />
+                              <p className="m-0 text-[10px] font-medium text-secondary leading-snug">
+                                {ev.trainer_notes || ev.description || 'Dzień regeneracji — odpoczynek jest częścią treningu.'}
+                              </p>
+                            </div>
+                          ) : hasPhases ? (
+                            <div className="flex flex-col gap-1.5">
+                              {(ev.warmup_distance_km != null || ev.warmup_beginner_explanation) && (
+                                <InlinePhaseRow
+                                  icon={<Flame className="w-3 h-3 text-warning" />}
+                                  label="Rozgrzewka"
+                                  accentColor="var(--color-warning, #fbbf24)"
+                                  distKm={ev.warmup_distance_km}
+                                  pace={ev.warmup_exact_pace ?? undefined}
+                                  hrTarget={ev.warmup_heart_rate_target ?? undefined}
+                                  coachCue={ev.warmup_beginner_explanation ?? undefined}
+                                />
+                              )}
+                              {(ev.main_distance_km != null || ev.main_beginner_explanation) && (
+                                <InlinePhaseRow
+                                  icon={<Activity className="w-3 h-3" style={{ color: evColor }} />}
+                                  label="Bieg główny"
+                                  accentColor={evColor}
+                                  distKm={ev.main_distance_km}
+                                  pace={ev.main_exact_pace ?? ev.main_target_pace ?? undefined}
+                                  hrTarget={ev.main_heart_rate_target ?? undefined}
+                                  coachCue={ev.main_beginner_explanation ?? undefined}
+                                />
+                              )}
+                              {(ev.cooldown_distance_km != null || ev.cooldown_beginner_explanation) && (
+                                <InlinePhaseRow
+                                  icon={<Wind className="w-3 h-3 text-accent" />}
+                                  label="Schłodzenie"
+                                  accentColor="var(--color-accent)"
+                                  distKm={ev.cooldown_distance_km}
+                                  pace={ev.cooldown_exact_pace ?? undefined}
+                                  hrTarget={ev.cooldown_heart_rate_target ?? undefined}
+                                  coachCue={ev.cooldown_beginner_explanation ?? undefined}
+                                />
+                              )}
+                              {ev.trainer_notes && (
+                                <div
+                                className="rounded-[2px] border px-2.5 py-2 flex gap-2 items-start"
+                                style={{
+                                  background: 'var(--color-surface-overlay)',
+                                  borderColor: 'var(--color-border)',
+                                }}
+                              >
+                                  <BrainCircuit className="w-3 h-3 shrink-0 mt-0.5" style={{ color: 'var(--color-accent)' }} />
+                                  <p className="m-0 text-[10px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{ev.trainer_notes}</p>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            ev.description
+                              ? <p className="text-[10px] text-secondary leading-relaxed m-0">{ev.description}</p>
+                              : null
+                          )}
+
+                          {/* Strava actions */}
+                          {ev.is_completed && (
+                            <div className="pt-1.5 border-t border-border/20 flex items-center gap-2">
+                              {onRequestAnalysis && (
+                                <button
+                                  onClick={() => {
+                                    const stravaId = typeof ev.id === 'string' ? parseInt(ev.id.replace('strava-', ''), 10) : Number(ev.id);
+                                    if (!isNaN(stravaId)) onRequestAnalysis(stravaId, ev.label);
+                                  }}
+                                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all"
+                                  style={{
+                                    background: 'rgba(168,85,247,0.1)',
+                                    border: '1px solid rgba(168,85,247,0.25)',
+                                    color: '#a855f7',
+                                  }}
+                                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(168,85,247,0.18)'; }}
+                                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(168,85,247,0.1)'; }}
+                                >
+                                  <Sparkles className="w-3 h-3" />
+                                  Analiza
+                                </button>
+                              )}
+                              <SaveRouteWidget
+                                defaultName={ev.label}
+                                size="xs"
+                                onSave={async (name) => {
+                                  const stravaId = typeof ev.id === 'string' ? parseInt(ev.id.replace('strava-', ''), 10) : ev.id;
+                                  if (isNaN(stravaId)) return false;
+                                  try {
+                                    const res = await fetch(`${API}/api/routes/save-from-strava`, {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({
+                                        user_id: user?.user_id,
+                                        strava_activity_id: stravaId,
+                                        name: name || ev.label,
+                                      }),
+                                    });
+                                    if (res.ok) {
+                                      showToast('success', `Zapisano trasę: ${name || ev.label}`);
+                                      return true;
+                                    }
+                                  } catch {}
+                                  return false;
+                                }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             )}
           </div>
 
-          {/* Monthly summary */}
-          <div
-            className="grid grid-cols-2 gap-2"
-          >
-            <div
-              className="flex flex-col items-center p-3 rounded-xl"
-              style={{ background: 'rgba(252,76,2,0.06)', border: '1px solid rgba(252,76,2,0.15)' }}
-            >
-              <Zap className="w-4 h-4 mb-1" style={{ color: '#fc4c02' }} />
-              <span className="text-lg font-black" style={{ color: '#fc4c02' }}>
-                {stravaCount}
-              </span>
-              <span className="text-[10px] font-medium text-center" style={{ color: 'var(--color-text-muted)' }}>
-                Treningi Strava
-              </span>
+          {/* ── Wygeneruj nowy plan — przyklejony na dole ── */}
+          <div className="shrink-0 pt-2 border-t border-border/30">
+            <div className="flex gap-2">
+              <button
+                id="btn-kasia-generate-plan"
+                disabled={isGenerating}
+                onClick={() => setShowPlanModal(true)}
+                className="btn-lime flex-1 h-9 py-0 flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider cursor-pointer"
+              >
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                    KASIA MYŚLI...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                    Wygeneruj nowy plan
+                  </>
+                )}
+              </button>
+              <button
+                id="btn-delete-all-plans"
+                disabled={planCount === 0}
+                onClick={handleDeleteAllPlans}
+                className="w-9 h-9 shrink-0 flex items-center justify-center border border-danger/20 text-danger hover:border-danger hover:bg-danger/10 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:border-danger/20 disabled:cursor-not-allowed rounded-[var(--radius)] transition-colors cursor-pointer bg-transparent"
+                title="Usuń wszystkie plany"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
             </div>
-            <div
-              className="flex flex-col items-center p-3 rounded-xl"
-              style={{ background: 'var(--color-accent-subtle)', border: '1px solid rgba(99,102,241,0.2)' }}
-            >
-              <Target className="w-4 h-4 mb-1" style={{ color: 'var(--color-accent)' }} />
-              <span className="text-lg font-black" style={{ color: 'var(--color-accent)' }}>
-                {planCount}
-              </span>
-              <span className="text-[10px] font-medium text-center" style={{ color: 'var(--color-text-muted)' }}>
-                Plany od Kasi
-              </span>
-            </div>
+            <p className="text-[9px] text-muted text-center mt-1.5 mb-0">
+              Wygenerowanie nowego planu usunie poprzedni.
+            </p>
           </div>
+
         </div>
       )}
 
@@ -1730,14 +1393,13 @@ export const PlannerPanel: React.FC = () => {
 
           {/* Header */}
           <div className="flex items-center justify-between px-1">
-            <h3 className="text-xs font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-text-secondary)' }}>
-              <Target className="w-4 h-4" style={{ color: 'var(--color-accent)' }} />
+            <h3 className="label-mono flex items-center gap-2 m-0 text-secondary">
+              <Target className="w-4 h-4 text-accent" />
               Cele startowe
             </h3>
             <button
               onClick={() => setShowGoalForm(!showGoalForm)}
-              className="text-[10px] font-bold flex items-center gap-1 transition-opacity hover:opacity-70"
-              style={{ color: 'var(--color-accent)' }}
+              className="text-[10px] font-bold flex items-center gap-1 transition-opacity hover:opacity-70 text-accent bg-transparent border-none cursor-pointer p-0"
             >
               <Plus className="w-3 h-3" /> Dodaj cel
             </button>
@@ -1747,8 +1409,7 @@ export const PlannerPanel: React.FC = () => {
           {showGoalForm && (
             <form
               onSubmit={handleCreateGoal}
-              className="flex flex-col gap-2 p-3 rounded-xl"
-              style={{ background: 'var(--color-surface-elevated)', border: '1px solid var(--color-border)' }}
+              className="flex flex-col gap-2 p-3 card-sporty animate-in fade-in slide-in-from-top-2"
             >
               <input
                 value={goalTitle}
@@ -1761,11 +1422,10 @@ export const PlannerPanel: React.FC = () => {
                 <input type="date" value={goalDate} onChange={e => setGoalDate(e.target.value)} className="input-base flex-1" required />
                 <input value={goalDist} onChange={e => setGoalDist(e.target.value)} placeholder="km" type="number" step="0.1" className="input-base w-20" />
               </div>
-              <input value={goalTime} onChange={e => setGoalTime(e.target.value)} placeholder="Cel czasowy: 1:45:00" className="input-base" />
+              <input value={goalTime} onChange={e => setGoalTime(e.target.value)} placeholder="Cel czasowy: 1:45:00" className="input-base font-mono-custom" />
               <button
                 type="submit"
-                className="w-full py-2 text-white text-sm font-bold rounded-xl transition-all hover:opacity-90 active:scale-[0.98]"
-                style={{ background: 'linear-gradient(135deg, #4f46e5, #6366f1)' }}
+                className="btn-lime w-full py-2.5 mt-1"
               >
                 Zapisz cel
               </button>
@@ -1774,45 +1434,31 @@ export const PlannerPanel: React.FC = () => {
 
           {/* Goal list */}
           {goals.length === 0 ? (
-            <div
-              className="p-4 text-center text-xs rounded-xl border-dashed"
-              style={{ background: 'var(--color-surface-overlay)', border: '1px dashed var(--color-border)', color: 'var(--color-text-muted)' }}
-            >
+            <div className="p-4 text-center text-xs text-muted border border-dashed border-border/50 bg-black/10 rounded-[2px]">
               Brak celów — dodaj swój pierwszy start!
             </div>
           ) : (
             <div className="flex flex-col gap-2">
               {goals.map(g => (
-                <div
-                  key={g.id}
-                  className="group p-3 rounded-xl transition-all"
-                  style={{ background: 'var(--color-surface-elevated)', border: '1px solid var(--color-border)' }}
-                >
+                <div key={g.id} className="card-sporty p-3 group">
                   <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1">
-                      <p className="text-sm font-bold" style={{ color: 'var(--color-text-primary)' }}>{g.title}</p>
-                      <div className="flex items-center gap-3 mt-1 text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
-                        <span>📅 {g.race_date}</span>
-                        {g.distance_km && <span>{g.distance_km} km</span>}
-                        {g.target_time && <span>⏱ {g.target_time}</span>}
+                    <div className="flex-1 min-w-0">
+                      <p className="m-0 text-sm font-bold text-primary truncate">{g.title}</p>
+                      <div className="flex items-center flex-wrap gap-2.5 mt-1.5 text-[10px] text-muted font-mono-custom">
+                        <span className="flex items-center gap-1"><CalendarIcon className="w-3 h-3" /> {g.race_date}</span>
+                        {g.distance_km && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {g.distance_km} km</span>}
+                        {g.target_time && <span className="flex items-center gap-1"><Timer className="w-3 h-3" /> {g.target_time}</span>}
                       </div>
                     </div>
-                    <div
-                      className="shrink-0 px-2.5 py-1 rounded-full text-[11px] font-bold"
-                      style={{
-                        background: g.days_left <= 7 ? 'rgba(248,113,113,0.12)' : g.days_left <= 30 ? 'rgba(251,191,36,0.12)' : 'var(--color-accent-subtle)',
-                        color: g.days_left <= 7 ? '#f87171' : g.days_left <= 30 ? '#fbbf24' : 'var(--color-accent)',
-                      }}
-                    >
+                    <div className={`badge ${g.days_left <= 7 ? 'badge-danger' : g.days_left <= 30 ? 'badge-warning' : 'badge-lime'}`}>
                       {g.days_left > 0 ? `za ${g.days_left} dni` : 'Dziś!'}
                     </div>
                   </div>
-                  <div className="flex gap-2 mt-2">
+                  <div className="flex gap-2 mt-3 pt-3 border-t border-border/50">
                     <button
                       onClick={() => handleGeneratePlan(g.id)}
                       disabled={generating === g.id}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all disabled:opacity-50"
-                      style={{ background: 'var(--color-accent-subtle)', border: '1px solid rgba(99,102,241,0.2)', color: 'var(--color-accent)' }}
+                      className="flex-1 btn-ghost border-accent/20 bg-accent-subtle text-accent hover:border-accent hover:bg-accent/20 py-1.5 text-[11px]"
                     >
                       {generating === g.id
                         ? <><Loader2 className="w-3 h-3 animate-spin" /> Generuję…</>
@@ -1821,10 +1467,8 @@ export const PlannerPanel: React.FC = () => {
                     </button>
                     <button
                       onClick={() => handleDeleteGoal(g.id)}
-                      className="p-1.5 rounded-lg transition-all opacity-0 group-hover:opacity-100"
-                      style={{ color: 'var(--color-text-muted)' }}
-                      onMouseOver={e => { (e.currentTarget as HTMLElement).style.color = '#f87171'; (e.currentTarget as HTMLElement).style.background = 'rgba(248,113,113,0.1)'; }}
-                      onMouseOut={e => { (e.currentTarget as HTMLElement).style.color = 'var(--color-text-muted)'; (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+                      className="btn-ghost px-2 text-muted border-transparent hover:text-danger hover:border-danger/30 hover:bg-danger/10 opacity-0 group-hover:opacity-100 transition-all focus:opacity-100"
+                      aria-label="Usuń cel"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -1836,12 +1480,9 @@ export const PlannerPanel: React.FC = () => {
 
           {/* Kasia message */}
           {kasiaMessage && (
-            <div
-              className="p-3 rounded-xl text-sm whitespace-pre-wrap"
-              style={{ background: 'var(--color-accent-subtle)', border: '1px solid rgba(99,102,241,0.2)', color: 'var(--color-text-primary)' }}
-            >
-              <p className="text-[10px] uppercase font-bold tracking-wider mb-1.5" style={{ color: 'var(--color-accent)' }}>
-                💬 Plan od Kasi
+            <div className="card-sporty p-3 mt-2 bg-accent-subtle border-accent/30 text-sm text-primary whitespace-pre-wrap">
+              <p className="label-mono text-accent mb-2">
+                Plan od Kasi
               </p>
               {kasiaMessage}
             </div>

@@ -21,6 +21,8 @@ interface SaveRouteWidgetProps {
   size?: 'sm' | 'xs';
   /** Dodatkowe klasy CSS na głównym wrapperies. */
   className?: string;
+  /** Czy przycisk ma być małą kwadratową ikonką */
+  iconOnly?: boolean;
 }
 
 export const SaveRouteWidget: React.FC<SaveRouteWidgetProps> = ({
@@ -28,6 +30,7 @@ export const SaveRouteWidget: React.FC<SaveRouteWidgetProps> = ({
   defaultName = '',
   size = 'sm',
   className = '',
+  iconOnly = false,
 }) => {
   const [state, setState] = useState<SaveState>('idle');
   const [name, setName]   = useState(defaultName);
@@ -63,11 +66,10 @@ export const SaveRouteWidget: React.FC<SaveRouteWidgetProps> = ({
   if (state === 'naming') {
     return (
       <div
-        className={`flex flex-col gap-2 p-3 rounded-xl ${className}`}
-        style={{ background: 'var(--color-surface-overlay)', border: '1px solid var(--color-border)' }}
+        className={`flex flex-col gap-2 p-3 rounded-xl border border-border bg-card shadow-sm ${className}`}
         onClick={stopProp}
       >
-        <p className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+        <p className="text-xs font-semibold text-muted-foreground">
           Nazwa trasy:
         </p>
         <input
@@ -82,25 +84,18 @@ export const SaveRouteWidget: React.FC<SaveRouteWidgetProps> = ({
           }}
           onClick={stopProp}
           placeholder="np. Pętla przez park"
-          className="input-base text-sm"
-          style={{ width: '100%' }}
+          className="w-full px-3 py-1.5 rounded-lg border border-input bg-background text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-ring"
         />
         <div className="flex gap-2">
           <button
             onClick={(e) => { stopProp(e); doSave(); }}
-            className="flex-1 flex items-center justify-center gap-1 py-2 rounded-lg text-xs font-bold text-white"
-            style={{ background: 'linear-gradient(135deg,#6366f1,#818cf8)' }}
+            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/95 transition-colors disabled:opacity-50 cursor-pointer"
           >
             <Check className="w-3.5 h-3.5" /> Zapisz
           </button>
           <button
             onClick={(e) => { stopProp(e); setState('idle'); setName(defaultName); }}
-            className="px-3 py-2 rounded-lg text-xs font-bold flex items-center"
-            style={{
-              background: 'var(--color-surface-elevated)',
-              border: '1px solid var(--color-border)',
-              color: 'var(--color-text-secondary)',
-            }}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center border border-border bg-muted text-muted-foreground hover:bg-muted/80 transition-colors cursor-pointer"
           >
             <X className="w-3.5 h-3.5" />
           </button>
@@ -110,34 +105,33 @@ export const SaveRouteWidget: React.FC<SaveRouteWidgetProps> = ({
   }
 
   /* ── Przycisk główny (idle / saving / ok / error) ────────── */
-  const bg    = state === 'ok'    ? 'rgba(52,211,153,0.11)'
-              : state === 'error' ? 'rgba(248,113,113,0.09)'
-              : state === 'saving'? 'var(--color-accent-subtle)'
-              : 'var(--color-accent-subtle)';
-  const bdr   = state === 'ok'    ? '1px solid rgba(52,211,153,0.32)'
-              : state === 'error' ? '1px solid rgba(248,113,113,0.28)'
-              : '1px solid rgba(99,102,241,0.22)';
-  const clr   = state === 'ok'    ? '#34d399'
-              : state === 'error' ? '#f87171'
-              : 'var(--color-accent)';
+  const buttonClass = state === 'ok' ? 'border-success/30 bg-success/15 text-success cursor-default'
+                    : state === 'error' ? 'border-destructive/30 bg-destructive/10 text-destructive cursor-pointer'
+                    : state === 'saving' ? 'border-border bg-muted text-muted-foreground cursor-not-allowed opacity-60'
+                    : 'border-border bg-muted text-muted-foreground hover:bg-secondary hover:text-foreground cursor-pointer';
+
   const label = state === 'saving' ? 'Zapisywanie…'
               : state === 'ok'     ? 'Zapisano w bibliotece!'
               : state === 'error'  ? 'Błąd — spróbuj ponownie'
               : 'Zapisz trasę do biblioteki';
 
+  const layoutClass = iconOnly
+    ? `${size === 'xs' ? 'w-8 h-8' : 'w-9 h-9'} p-0 flex items-center justify-center shrink-0 rounded-lg`
+    : `w-full flex items-center justify-center gap-2 rounded-xl px-4 py-2 ${txtSm}`;
+
   return (
     <button
       onClick={(e) => { stopProp(e); if (state === 'idle') setState('naming'); }}
       disabled={state === 'saving'}
-      className={`w-full flex items-center justify-center gap-2 rounded-xl px-4 py-2 ${txtSm} font-semibold
-                  transition-all duration-200 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-60 ${className}`}
-      style={{ background: bg, border: bdr, color: clr }}
+      className={`${layoutClass} border font-semibold
+                  transition-all duration-200 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-60 ${buttonClass} ${className}`}
+      title={iconOnly ? label : undefined}
     >
       {state === 'saving' && <Loader2  className={`${icoSz} animate-spin`} />}
       {state === 'ok'     && <Check    className={icoSz} />}
       {state === 'error'  && <X        className={icoSz} />}
       {(state === 'idle') && <BookmarkPlus className={icoSz} />}
-      {label}
+      {!iconOnly && label}
     </button>
   );
 };
